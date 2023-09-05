@@ -36,17 +36,12 @@ def savePointCloud(image, fileName, color):
           f.write("%f %f %f %s\n" % (pt[0], pt[1], pt[2]-1, "%d %d %d" % color))
    f.close()
 
-def getPointCloud(client, savePC=False, saveDir="./", color=(0, 0, 0)):
+def getPointCloud(client):
     rawImage = client.simGetImage("0", airsim.ImageType.DepthPerspective)
     assert rawImage is not None, "Camera is not returning image, please check airsim for error messages"
 
     png = cv2.imdecode(np.frombuffer(rawImage, np.uint8) , cv2.IMREAD_UNCHANGED)
     gray = cv2.cvtColor(png, cv2.COLOR_BGR2GRAY)
     Image3D = cv2.reprojectImageTo3D(gray, projectionMatrix)
-
-    if savePC: 
-       save_path = os.path.join(saveDir, outputFile)
-       outputFile = f"cloud-{time.time()}.asc" 
-       savePointCloud(Image3D, save_path, color)
-
+    
     return Image3D
