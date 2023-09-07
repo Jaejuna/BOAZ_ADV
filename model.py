@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import torchvision.models as models
 
 class MovePredictModel(nn.Module):
-    def __init__(self, input_shape=(144, 256), num_classes=6, backbone="resnet18", pretrained=True):
+    def __init__(self, num_classes, backbone="resnet18", pretrained=True):
         super.__init__()
         if backbone == "resnet18":
             self.backbone = models.resnet18(pretrained=pretrained)

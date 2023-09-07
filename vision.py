@@ -64,3 +64,47 @@ def getPointCloud(client):
    gray = cv2.cvtColor(png, cv2.COLOR_BGR2GRAY)
    Image3D = cv2.reprojectImageTo3D(gray, projectionMatrix)
    return Image3D 
+
+def pointCloudReconstruction():
+   demo_icp_pcds = o3d.data.OfficePointClouds()
+
+   voxel_size=0.04
+   distance_threshold = voxel_size 
+   radius_normal = voxel_size * 2
+   radius_feature = voxel_size * 3
+   max_nn = 30
+
+   pcd_global = o3d.geometry.PointCloud()
+   prev_pcd = o3d.io.read_point_cloud(demo_icp_pcds.paths[0])
+   prev_pcd = prev_pcd.voxel_down_sample(voxel_size=voxel_size) 
+   prev_pcd.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=radius_normal, max_nn=max_nn))
+   prev_feature = o3d.pipelines.registration.compute_fpfh_feature(
+         prev_pcd, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=max_nn))
+   pcd_global = pcd_global + prev_pcd
+   for i in range(1, 30):
+      curr_pcd = o3d.io.read_point_cloud(demo_icp_pcds.paths[i])
+      curr_pcd = curr_pcd.voxel_down_sample(voxel_size=voxel_size) 
+      curr_pcd.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=radius_normal, max_nn=max_nn))
+
+      curr_feature = o3d.pipelines.registration.compute_fpfh_feature(
+               curr_pcd, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=max_nn))
+
+      result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
+               prev_pcd, curr_pcd, prev_feature, curr_feature, True, distance_threshold,
+               o3d.pipelines.registration.TransformationEstimationPointToPoint(False), 3, 
+               [o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.3),
+               o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold)], 
+               o3d.pipelines.registration.RANSACConvergenceCriteria(10000000, 0.99))
+
+      refinement_result =o3d.pipelines.registration.registration_icp(
+                  prev_pcd, curr_pcd, distance_threshold, result.transformation,
+                  o3d.pipelines.registration.TransformationEstimationPointToPlane())
+
+      T_ref = refinement_result.transformation
+      curr_pcd = copy.deepcopy(curr_pcd).transform(np.linalg.inv(T_ref))
+      curr_pcd = o3d.geometry.PointCloud(curr_pcd)
+      pcd_global = pcd_global + curr_pcd
+
+      prev_pcd = copy.deepcopy(curr_pcd)
+      prev_feature = copy.deepcopy(curr_feature)
+   o3d.io.write_point_cloud("office.ply", pcd_global)

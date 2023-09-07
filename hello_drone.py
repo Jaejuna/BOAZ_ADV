@@ -17,6 +17,9 @@ client.enableApiControl(True)
 client.armDisarm(True)
 client.takeoffAsync().join()
 
+yaw_rate = 90 # 초당 5도
+duration = (3.14159265358979323846 / 2) / (yaw_rate * 3.14159265358979323846 / 180) # 90도 회전하는데 필요한 시간 계산
+client.rotateByYawRateAsync(yaw_rate, duration).join()
 client.moveToPositionAsync(-10, 10, -10, 5).join()
 
 client.hoverAsync().join()

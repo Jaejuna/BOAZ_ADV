@@ -6,97 +6,104 @@ from IPython.display import clear_output
 
 import torch
 import numpy as np
+from math import pi
 
-l1 = 64
-l2 = 150
-l3 = 100
-l4 = 4
+import setup_path
+import airsim
+
+from model import MovePredictModel
+from vision import *
+from config import args
+from train_utils import *
 
 
-model = torch.nn.Sequential(
-    torch.nn.Linear(l1, l2),
-    torch.nn.ReLU(),
-    torch.nn.Linear(l2, l3),
-    torch.nn.ReLU(),
-    torch.nn.Linear(l3,l4)
-)
+device = args.device
+yaw_rate = args["drone"].yaw_rate
 
-model2 = copy.deepcopy(model) 
-model2.load_state_dict(model.state_dict()) 
+model1 = MovePredictModel(num_classes=args.num_classes, backbone="resnet101")
+model2 = copy.deepcopy(model1) 
+model2.load_state_dict(model1.state_dict()) 
+model1.to(device)
+model2.to(device)
 
 loss_fn = torch.nn.MSELoss()
-learning_rate = 1e-3
-optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+optimizer = torch.optim.Adam(model1.parameters(), lr=args.learning_rate)
 
-gamma = 0.9
-epsilon = 0.3
-
-epochs = 5000
+replay = deque(maxlen=args.mem_size)
 losses = []
-mem_size = 1000
-batch_size = 200
-replay = deque(maxlen=mem_size)
-max_moves = 50
-h = 0
-sync_freq = 500 
-j=0
-action_set = {
-    0: 'u',
-    1: 'd',
-    2: 'l',
-    3: 'r',
-}
-for i in range(epochs):
-    game = Gridworld(size=4, mode='random')
-    state1_ = game.board.render_np().reshape(1,64) + np.random.rand(1,64)/100.0
-    state1 = torch.from_numpy(state1_).float()
+episode_step=0
+
+client = airsim.MultirotorClient()
+client.confirmConnection()
+client.enableApiControl(True)
+
+client.armDisarm(True)
+client.takeoffAsync().join()
+
+for epoch in range(args.epochs):
+    rgb, depth = getImages(client)
+
+    client.hoverAsync().join()
+
+    rgb, depth = getImages(client)
+    pointCloud = getPointCloud(client)
+
+    # game = Gridworld(size=4, mode='random')
+    # state1_ = game.board.render_np().reshape(1,64) + np.random.rand(1,64)/100.0
+    # state1 = torch.from_numpy(state1_).float()
     status = 1
     mov = 0
     while(status == 1): 
-        j+=1
+        episode_step += 1
         mov += 1
-        qval = model(state1)
+        qval = model1(rgb)
         qval_ = qval.data.numpy()
-        if (random.random() < epsilon):
-            action_ = np.random.randint(0,4)
+        if (random.random() < args.epsilon):
+            action = np.random.randint(0, args.n_classes)
         else:
-            action_ = np.argmax(qval_)
+            action = np.argmax(qval_)
         
-        action = action_set[action_]
-        game.makeMove(action)
-        state2_ = game.board.render_np().reshape(1,64) + np.random.rand(1,64)/100.0
-        state2 = torch.from_numpy(state2_).float()
+        client.rotateByYawRateAsync(yaw_rate, clacDuration(yaw_rate, )).join()
+        client.moveToPositionAsync(-10, 10, -10, args.defualt_velocity).join()
+
+        # game.makeMove(action)
+        # state2_ = game.board.render_np().reshape(1,64) + np.random.rand(1,64)/100.0
+        # state2 = torch.from_numpy(state2_).float()
+        rgb, depth = getImages(client)
         reward = game.reward()
         done = True if reward > 0 else False
         exp =  (state1, action_, reward, state2, done)
         replay.append(exp) 
         state1 = state2
         
-        if len(replay) > batch_size:
-            minibatch = random.sample(replay, batch_size)
+        if len(replay) > args.batch_size:
+            minibatch = random.sample(replay, args.batch_size)
             state1_batch = torch.cat([s1 for (s1,a,r,s2,d) in minibatch])
             action_batch = torch.Tensor([a for (s1,a,r,s2,d) in minibatch])
             reward_batch = torch.Tensor([r for (s1,a,r,s2,d) in minibatch])
             state2_batch = torch.cat([s2 for (s1,a,r,s2,d) in minibatch])
             done_batch = torch.Tensor([d for (s1,a,r,s2,d) in minibatch])
-            Q1 = model(state1_batch) 
+            Q1 = model1(state1_batch) 
             with torch.no_grad():
                 Q2 = model2(state2_batch) 
             
-            Y = reward_batch + gamma * ((1-done_batch) * torch.max(Q2,dim=1)[0])
+            Y = reward_batch + args.gamma * ((1-done_batch) * torch.max(Q2,dim=1)[0])
             X = Q1.gather(dim=1,index=action_batch.long().unsqueeze(dim=1)).squeeze()
             loss = loss_fn(X, Y.detach())
-            print(i, loss.item())
-            clear_output(wait=True)
+            print(epoch, loss.item())
             optimizer.zero_grad()
             loss.backward()
             losses.append(loss.item())
             optimizer.step()
             
-            if j % sync_freq == 0: 
-                model2.load_state_dict(model.state_dict())
+            if episode_step % args.sync_freq == 0: 
+                model2.load_state_dict(model1.state_dict())
         if reward != -1 or mov > max_moves:
             status = 0
             mov = 0
+    
+    client.reset()
         
+client.enableApiControl(False)
 losses = np.array(losses)
+np.save("./results/losses.npy", losses)
