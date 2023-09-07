@@ -21,8 +21,8 @@ model = torch.nn.Sequential(
     torch.nn.Linear(l3,l4)
 )
 
-model2 = copy.deepcopy(model) #A
-model2.load_state_dict(model.state_dict()) #B
+model2 = copy.deepcopy(model) 
+model2.load_state_dict(model.state_dict()) 
 
 loss_fn = torch.nn.MSELoss()
 learning_rate = 1e-3
@@ -38,7 +38,7 @@ batch_size = 200
 replay = deque(maxlen=mem_size)
 max_moves = 50
 h = 0
-sync_freq = 500 #A
+sync_freq = 500 
 j=0
 action_set = {
     0: 'u',
@@ -69,7 +69,7 @@ for i in range(epochs):
         reward = game.reward()
         done = True if reward > 0 else False
         exp =  (state1, action_, reward, state2, done)
-        replay.append(exp) #H
+        replay.append(exp) 
         state1 = state2
         
         if len(replay) > batch_size:
@@ -81,7 +81,7 @@ for i in range(epochs):
             done_batch = torch.Tensor([d for (s1,a,r,s2,d) in minibatch])
             Q1 = model(state1_batch) 
             with torch.no_grad():
-                Q2 = model2(state2_batch) #B
+                Q2 = model2(state2_batch) 
             
             Y = reward_batch + gamma * ((1-done_batch) * torch.max(Q2,dim=1)[0])
             X = Q1.gather(dim=1,index=action_batch.long().unsqueeze(dim=1)).squeeze()
@@ -93,7 +93,7 @@ for i in range(epochs):
             losses.append(loss.item())
             optimizer.step()
             
-            if j % sync_freq == 0: #C
+            if j % sync_freq == 0: 
                 model2.load_state_dict(model.state_dict())
         if reward != -1 or mov > max_moves:
             status = 0
