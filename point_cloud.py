@@ -38,6 +38,7 @@ def savePointCloud(image, fileName):
           f.write("%f %f %f %s\n" % (pt[0], pt[1], pt[2]-1, rgb))
    f.close()
 
+<<<<<<< HEAD
 client = airsim.MultirotorClient()
 
 while True:
@@ -54,3 +55,14 @@ while True:
         print("saved " + outputFile)
         airsim.wait_key("Press any key to exit")
         sys.exit(0)
+=======
+def getPointCloud(client):
+    rawImage = client.simGetImage("0", airsim.ImageType.DepthPerspective)
+    assert rawImage is not None, "Camera is not returning image, please check airsim for error messages"
+
+    png = cv2.imdecode(np.frombuffer(rawImage, np.uint8) , cv2.IMREAD_UNCHANGED)
+    gray = cv2.cvtColor(png, cv2.COLOR_BGR2GRAY)
+    Image3D = cv2.reprojectImageTo3D(gray, projectionMatrix)
+    
+    return Image3D
+>>>>>>> 2166db2898d2a07a0c9ca76474fa0adee8cb2550

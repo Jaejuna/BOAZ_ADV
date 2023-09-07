@@ -37,6 +37,7 @@ def test_model(model, mode='static', display=True):
     
     win = True if status == 2 else False
     return win
+
 def print_accuracy(model):
     max_games = 1000
     wins = 0
