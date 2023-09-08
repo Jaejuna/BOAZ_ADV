@@ -5,11 +5,17 @@ import airsim
 import os
 import time
 import math
+import copy
 
+import torch
 import cv2
 import numpy as np
 import open3d as o3d
 import plotly.graph_objects as go
+
+import binvox_rw
+
+from config import args
 
 # Constants for visualization
 MIN_DEPTH_METERS = 0
@@ -63,48 +69,85 @@ def getPointCloud(client):
    png = cv2.imdecode(np.frombuffer(depthImage, np.uint8) , cv2.IMREAD_UNCHANGED)
    gray = cv2.cvtColor(png, cv2.COLOR_BGR2GRAY)
    Image3D = cv2.reprojectImageTo3D(gray, projectionMatrix)
-   return Image3D 
+   return point_cloud_to_o3d(Image3D) 
 
-def pointCloudReconstruction():
-   demo_icp_pcds = o3d.data.OfficePointClouds()
+def get_transformation_matrix(client):
+    # 드론의 현재 위치 및 자세 정보를 얻음
+    pose = client.simGetVehiclePose()
+    position = pose.position
+    orientation = pose.orientation
+    
+    # 쿼터니언을 회전 행렬로 변환
+    rotation_matrix = airsim.to_rotation_matrix(orientation)
+    
+    # 변환 행렬 생성
+    transformation_matrix = np.eye(4)
+    transformation_matrix[:3, :3] = rotation_matrix
+    transformation_matrix[0, 3] = position.x_val
+    transformation_matrix[1, 3] = position.y_val
+    transformation_matrix[2, 3] = position.z_val
 
-   voxel_size=0.04
-   distance_threshold = voxel_size 
-   radius_normal = voxel_size * 2
-   radius_feature = voxel_size * 3
-   max_nn = 30
+    return transformation_matrix
 
-   pcd_global = o3d.geometry.PointCloud()
-   prev_pcd = o3d.io.read_point_cloud(demo_icp_pcds.paths[0])
-   prev_pcd = prev_pcd.voxel_down_sample(voxel_size=voxel_size) 
-   prev_pcd.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=radius_normal, max_nn=max_nn))
-   prev_feature = o3d.pipelines.registration.compute_fpfh_feature(
-         prev_pcd, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=max_nn))
-   pcd_global = pcd_global + prev_pcd
-   for i in range(1, 30):
-      curr_pcd = o3d.io.read_point_cloud(demo_icp_pcds.paths[i])
-      curr_pcd = curr_pcd.voxel_down_sample(voxel_size=voxel_size) 
-      curr_pcd.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=radius_normal, max_nn=max_nn))
+def point_cloud_to_o3d(point_cloud):
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(point_cloud.reshape(-1, 3))
+    return pcd
 
-      curr_feature = o3d.pipelines.registration.compute_fpfh_feature(
-               curr_pcd, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=max_nn))
+def merge_point_clouds(cloud1, cloud2, client):
+   source = copy.deepcopy(cloud1)
+   target = copy.deepcopy(cloud2)
 
-      result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
-               prev_pcd, curr_pcd, prev_feature, curr_feature, True, distance_threshold,
-               o3d.pipelines.registration.TransformationEstimationPointToPoint(False), 3, 
-               [o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.3),
-               o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold)], 
-               o3d.pipelines.registration.RANSACConvergenceCriteria(10000000, 0.99))
+   # coarse-to-fine manner의 Iterative Closest Point(ICP) 알고리즘을 사용하여 두 포인트 클라우드를 정합
+   threshold = 0.02
+   T = get_transformation_matrix(client)
+   reg_p2p = o3d.pipelines.registration.registration_icp(
+                     source, target, threshold, T, 
+                     o3d.pipelines.registration.TransformationEstimationPointToPoint())
+   
+   # 변환 행렬을 사용하여 source 포인트 클라우드를 변환
+   source.transform(reg_p2p.transformation)
 
-      refinement_result =o3d.pipelines.registration.registration_icp(
-                  prev_pcd, curr_pcd, distance_threshold, result.transformation,
-                  o3d.pipelines.registration.TransformationEstimationPointToPlane())
+   # 변환된 포인트 클라우드와 target 포인트 클라우드를 결합
+   merged_pcd = source + target
+   return merged_pcd
 
-      T_ref = refinement_result.transformation
-      curr_pcd = copy.deepcopy(curr_pcd).transform(np.linalg.inv(T_ref))
-      curr_pcd = o3d.geometry.PointCloud(curr_pcd)
-      pcd_global = pcd_global + curr_pcd
+def pcd_to_voxel_tensor(pcd):
+   # 포인트 클라우드에서 복셀 그리드 생성
+   voxel_size = args.voxel_size
+   voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(pcd, voxel_size=voxel_size)
+   
+   # 복셀 그리드의 바운딩 박스 얻기
+   min_bound = voxel_grid.get_min_bound() // voxel_size
+   max_bound = voxel_grid.get_max_bound() // voxel_size
+   dims = np.asarray(max_bound - min_bound, dtype=np.int)
 
-      prev_pcd = copy.deepcopy(curr_pcd)
-      prev_feature = copy.deepcopy(curr_feature)
-   o3d.io.write_point_cloud("office.ply", pcd_global)
+   # 빈 텐서(모든 값이 0) 생성
+   tensor = torch.zeros(*dims, dtype=torch.float32)
+
+   # 복셀의 중심 포인트 얻기
+   centers = np.asarray(voxel_grid.get_voxels(), dtype=np.float32)[:, :3]  # (num_voxels, 3)
+   indices = np.round((centers - min_bound) / voxel_size).astype(np.int)
+
+   # 텐서에 복셀 값 설정
+   tensor[indices[:, 0], indices[:, 1], indices[:, 2]] = 1.0
+   return tensor
+
+def getMapPointCloud(client):
+   binvox_path = os.path.join("results", "map.binvox")
+   if not os.path.exists(binvox_path):
+      c = airsim.VehicleClient()
+      center = airsim.Vector3r(0, 0, 0)
+      c.simCreateVoxelGrid(center, 100, 100, 100, args.voxel_size, binvox_path)
+
+   # 복셀 데이터 읽기
+   with open(binvox_path, 'rb') as f:
+      voxel_data = binvox_rw.read_as_3d_array(f)
+
+   filled_voxels = np.where(voxel_data.data)
+   coords = np.array(list(zip(*filled_voxels)))
+   
+   pcd = o3d.geometry.PointCloud()
+   pcd.points = o3d.utility.Vector3dVector(coords * voxel_data.scale + voxel_data.translate)
+
+   return pcd

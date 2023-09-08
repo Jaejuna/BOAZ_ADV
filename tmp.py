@@ -1,2 +1,2 @@
-a = 1
-assert a == 2
+import random
+print(random.uniform(-1, 1))

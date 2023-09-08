@@ -4,14 +4,12 @@ import torch
 drone = edict()
 drone.yaw_rate = 90
 drone.default_velocity = 5
+drone.moving_unit = 0.5
 
 # main
 args = edict(drone=drone)
 
 args.device = torch.device(f"cuda" if torch.cuda.is_available() else "cpu")
-
-args.exp_time = None
-args.exp_name = None
 
 args.n_classes = 4
 
@@ -27,4 +25,9 @@ args.epochs = 5000
 args.max_time = 60  
 args.sync_freq = 500
 
-args.save_dir = ""
+args.eval_freq = 50
+
+args.voxel_threshold = 0.002
+args.voxel_size = 0.04
+
+args.model_name = ""
