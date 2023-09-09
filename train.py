@@ -1,102 +1,124 @@
+import utils.setup_path as setup_path
+import airsim
+
 from collections import deque
 
 import copy
 import random
 from IPython.display import clear_output
+from datetime import datetime
 
 import torch
 import numpy as np
+from math import pi
 
-l1 = 64
-l2 = 150
-l3 = 100
-l4 = 4
+from model import MovePredictModel
+from vision import *
+from train_utils import *
 
+from config.default import args
 
-model = torch.nn.Sequential(
-    torch.nn.Linear(l1, l2),
-    torch.nn.ReLU(),
-    torch.nn.Linear(l2, l3),
-    torch.nn.ReLU(),
-    torch.nn.Linear(l3,l4)
-)
+job_dir = os.path.join("./run", datetime.now().strftime('%Y-%m-%d_%Hh%Mm%Ss'))
+os.makedirs(job_dir, exist_ok=True)
 
-model2 = copy.deepcopy(model) #A
-model2.load_state_dict(model.state_dict()) #B
+device = args.device
 
-loss_fn = torch.nn.MSELoss()
-learning_rate = 1e-3
-optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+model1 = MovePredictModel(num_classes=args.num_classes, backbone="resnet101")
+model2 = copy.deepcopy(model1) 
+model2.load_state_dict(model1.state_dict()) 
+model1.to(device)
+model2.to(device)
 
-gamma = 0.9
-epsilon = 0.3
+criterion = torch.nn.MSELoss()
+optimizer = torch.optim.Adam(model1.parameters(), lr=args.learning_rate)
 
-epochs = 5000
+client = airsim.MultirotorClient()
+client.confirmConnection()
+client.enableApiControl(True)
+
+client.armDisarm(True)
+client.takeoffAsync().join()
+
+client.hoverAsync().join()
+
+best_acc = 0
+episode_step=0
+map_pcd = getMapPointCloud(client, args.voxel_size)
+
+replay = deque(maxlen=args.mem_size)
 losses = []
-mem_size = 1000
-batch_size = 200
-replay = deque(maxlen=mem_size)
-max_moves = 50
-h = 0
-sync_freq = 500 #A
-j=0
-action_set = {
-    0: 'u',
-    1: 'd',
-    2: 'l',
-    3: 'r',
-}
-for i in range(epochs):
-    game = Gridworld(size=4, mode='random')
-    state1_ = game.board.render_np().reshape(1,64) + np.random.rand(1,64)/100.0
-    state1 = torch.from_numpy(state1_).float()
-    status = 1
-    mov = 0
-    while(status == 1): 
-        j+=1
-        mov += 1
-        qval = model(state1)
-        qval_ = qval.data.numpy()
-        if (random.random() < epsilon):
-            action_ = np.random.randint(0,4)
-        else:
-            action_ = np.argmax(qval_)
+
+for epoch in range(args.epochs):
+    client.reset()
+
+    pcd_global = o3d.geometry.PointCloud()
+    pcd_global = merge_point_clouds(pcd_global, getPointCloud(client), client)
+
+    rgb1 = getRGBImage(client)
+    rgb1 = torch.from_numpy(rgb1).to(device)
+
+    status = "running"
+    start_time = time.time()
+    while(status == "running"): 
+        episode_step += 1
+        qval = model1(rgb1)
+        qval = qval.data.numpy()
+
+        x, y, z, radian, action = calcValues(qval, args)
         
-        action = action_set[action_]
-        game.makeMove(action)
-        state2_ = game.board.render_np().reshape(1,64) + np.random.rand(1,64)/100.0
-        state2 = torch.from_numpy(state2_).float()
-        reward = game.reward()
+        client.moveToPositionAsync(x, y, z, args["drone"].defualt_velocity, 
+                                   drivetrain=airsim.DrivetrainType.MaxDegreeOfFreedom, 
+                                   yaw_mode=airsim.YawMode(False, clacDuration(args["drone"].yaw_rate, radian))).join()
+
+        rgb2 = getRGBImage(client)
+        rgb2 = torch.from_numpy(rgb2).to(device)
+
+        curr_pcd = merge_point_clouds(pcd_global, getPointCloud(client), client)
+        reward = calcReward(map_pcd, pcd_global, curr_pcd, client, args)
+        pcd_global = copy.deepcopy(curr_pcd)
+
         done = True if reward > 0 else False
-        exp =  (state1, action_, reward, state2, done)
-        replay.append(exp) #H
-        state1 = state2
+        exp =  (rgb1, rgb2, action, reward, done)
+        replay.append(exp) 
+
+        rgb1 = rgb2
         
-        if len(replay) > batch_size:
-            minibatch = random.sample(replay, batch_size)
-            state1_batch = torch.cat([s1 for (s1,a,r,s2,d) in minibatch])
-            action_batch = torch.Tensor([a for (s1,a,r,s2,d) in minibatch])
-            reward_batch = torch.Tensor([r for (s1,a,r,s2,d) in minibatch])
-            state2_batch = torch.cat([s2 for (s1,a,r,s2,d) in minibatch])
-            done_batch = torch.Tensor([d for (s1,a,r,s2,d) in minibatch])
-            Q1 = model(state1_batch) 
+        if len(replay) > args.batch_size:
+            minibatch = random.sample(replay, args.batch_size)
+            rgb1_batch   = torch.cat([i1 for (i1,i2,a,r,d) in minibatch]).to(device)
+            rgb2_batch   = torch.cat([i2 for (i1,i2,a,r,d) in minibatch]).to(device)
+            action_batch = torch.Tensor([a for (i1,i2,a,r,d) in minibatch])
+            reward_batch = torch.Tensor([r for (i1,i2,a,r,d) in minibatch])
+            done_batch   = torch.Tensor([d for (i1,i2,a,r,d) in minibatch])
+
+            Q1 = model1(rgb1_batch) 
             with torch.no_grad():
-                Q2 = model2(state2_batch) #B
+                Q2 = model2(rgb2_batch) 
             
-            Y = reward_batch + gamma * ((1-done_batch) * torch.max(Q2,dim=1)[0])
-            X = Q1.gather(dim=1,index=action_batch.long().unsqueeze(dim=1)).squeeze()
-            loss = loss_fn(X, Y.detach())
-            print(i, loss.item())
-            clear_output(wait=True)
+            Y = reward_batch + args.gamma * ((1 - done_batch) * (torch.max(Q2[:, :3],dim=1)[0] + Q2[:, 3])) #N
+            X = Q1[:, :3].gather(dim=1,index=action_batch.long().unsqueeze(dim=1)).squeeze() + Q1[:, 3]
+            loss = criterion(X, Y.detach())
+            print(f"epoch : {epoch}, loss : {loss.item()}")
             optimizer.zero_grad()
             loss.backward()
-            losses.append(loss.item())
             optimizer.step()
             
-            if j % sync_freq == 0: #C
-                model2.load_state_dict(model.state_dict())
-        if reward != -1 or mov > max_moves:
-            status = 0
-            mov = 0
-        
+            if episode_step % args.sync_freq == 0: 
+                model2.load_state_dict(model1.state_dict())
+                torch.save(model1.state_dict(), os.path.join(job_dir, f'{args.model_name}_{epoch}.pth'))
+
+        if reward != -1 or args.max_time > (time.time() - start_time):
+            status = "stop"
+
+        if epoch % args.eval_freq == 0:
+            client.reset()
+            acc = getAccuracy(model1, client, map_pcd, args)
+            print(f"validation accuracy : {acc}")
+            if best_acc < acc:
+                best_acc = acc
+                print("Save new best model...")
+                torch.save(model1.state_dict(), os.path.join(job_dir, 'best_accurracy.pth'))
+
+client.enableApiControl(False)
 losses = np.array(losses)
+np.save(os.path.join(job_dir, "/losses.npy"), losses)
