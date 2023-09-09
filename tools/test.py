@@ -3,8 +3,8 @@ import airsim
 
 import torch
 
-from vision import *
-from train_utils import *
+from tools.vision import *
+from tools.train_utils import *
 
 def test(model, client, map_pcd, args):
     pcd_global = o3d.geometry.PointCloud()

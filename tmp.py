@@ -7,7 +7,7 @@ import tempfile
 import pprint
 import cv2
 
-from vision import *
+from tools.vision import *
 
 def getPointCloudForTest(client, fileName):
    depthImage = client.simGetImage("0", airsim.ImageType.DepthPerspective)

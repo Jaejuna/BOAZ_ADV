@@ -6,8 +6,8 @@ import numpy as np
 import random
 import torch
 
-from vision import *
-from train_utils import *
+from tools.vision import *
+from tools.train_utils import *
 
 def clacDuration(yaw_rate, radian):
     duration = (pi / radian) / (yaw_rate * pi / 180)

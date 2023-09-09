@@ -11,10 +11,10 @@ import torch
 import numpy as np
 from math import pi
 
-from test import getAccuracy
-from model import MovePredictModel
-from vision import *
-from train_utils import *
+from tools.test import getAccuracy
+from tools.models import MovePredictModel
+from tools.vision import *
+from tools.train_utils import *
 
 from config.default import args
 
