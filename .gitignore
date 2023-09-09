@@ -1,2 +1,4 @@
-./__pycache__
-./results
+__pycache__/*
+./results/*
+./run/*
+./maps/*
