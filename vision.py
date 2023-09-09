@@ -150,12 +150,12 @@ def pcd_to_voxel_tensor(pcd):
    tensor[indices[:, 0], indices[:, 1], indices[:, 2]] = 1.0
    return tensor
 
-def getMapPointCloud(client):
-   binvox_path = os.path.join("maps", "map.binvox")
+def getMapPointCloud(client, voxel_size):
+   binvox_path = os.path.join("maps", f"map-{voxel_size}.binvox")
    if not os.path.exists(binvox_path):
-      c = airsim.VehicleClient()
+      print("Create map voxel...")
       center = airsim.Vector3r(0, 0, 0)
-      c.simCreateVoxelGrid(center, 100, 100, 100, args.voxel_size, binvox_path)
+      client.simCreateVoxelGrid(center, 100, 100, 100, voxel_size, binvox_path)
 
    # 복셀 데이터 읽기
    with open(binvox_path, 'rb') as f:

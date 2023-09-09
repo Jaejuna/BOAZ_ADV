@@ -5,7 +5,7 @@ import torchvision.models as models
 
 class MovePredictModel(nn.Module):
     def __init__(self, num_classes, backbone="resnet18", pretrained=True):
-        super.__init__()
+        super().__init__()
         if backbone == "resnet18":
             self.backbone = models.resnet18(pretrained=pretrained)
         elif backbone == "resnet34":

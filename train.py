@@ -5,7 +5,6 @@ from collections import deque
 
 import copy
 import random
-from IPython.display import clear_output
 from datetime import datetime
 
 import torch
@@ -122,4 +121,4 @@ for epoch in range(args.epochs):
 
 client.enableApiControl(False)
 losses = np.array(losses)
-np.save(os.path.join(job_dir, "/losses.npy"), losses)
+np.save(os.path.join(job_dir, "losses.npy"), losses)

@@ -68,19 +68,24 @@ client.enableApiControl(True)
 client.armDisarm(True)
 client.takeoffAsync().join()
 
-client.moveToPositionAsync(-10, 10, -10, 10).join()
+# client.moveToPositionAsync(-10, 10, -10, 10).join()
 
-rgb = getImages(client)
+# rgb = getImages(client)
 
-cv2.imwrite("./results/rgb1.png", rgb)
+# cv2.imwrite("./results/rgb1.png", rgb)
 
-getPointCloudForTest(client, "./results/cloud1.asc")
+# getPointCloudForTest(client, "./results/cloud1.asc")
 
-client.moveToPositionAsync(-10, 10, -10, 10).join()
+# client.moveToPositionAsync(-10, 10, -10, 10).join()
 
-rgb = getImages(client)
+# rgb = getImages(client)
 
-cv2.imwrite("./results/rgb2.png", rgb)
+# cv2.imwrite("./results/rgb2.png", rgb)
 
-getPointCloudForTest(client, "./results/cloud2.asc")
+# getPointCloudForTest(client, "./results/cloud2.asc")
 
+binvox_path = os.path.join("maps", "map.binvox")
+print("Create map voxel...")
+center = airsim.Vector3r(0, 0, 0)
+client.simCreateVoxelGrid(center, 100, 100, 100, 0.5, binvox_path)
+print("done!")
