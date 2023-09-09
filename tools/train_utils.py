@@ -14,27 +14,40 @@ def clacDuration(yaw_rate, radian):
     return duration
 
 def calcValues(qval, args):
-    action_vector = qval[:3]
+    action_vector = qval[0, :3]
     one_hot = np.zeros_like(action_vector)
     action = np.argmax(action_vector)
-    radian = qval[3]
+    radian = qval[0, 3]
 
     if random.random() < args.epsilon:
-        action = np.random.randint(0, args.n_classes - 1)
+        action = np.random.randint(0, args.num_classes - 1)
         radian = random.uniform(-1, 1)
         
     one_hot[action] = 1
     action_vector = one_hot * args["drone"].moving_unit
+    action_vector = list(map(float, action_vector))
 
     if radian < -1:  radian %= -1
     elif radian > 1: radian %= 1
+    
 
     return *action_vector, radian, action
+
+def calcStatus(reward, elapsedTime, args):
+    status = "running"
+    if args.max_time > elapsedTime:
+        status = "time out"
+        if reward != -1:
+            if reward > 0:
+                status = "work well"
+            else:
+                status = "work bad"
+    return status
 
 def calcReward(map_pcd, prev_pcd, curr_pcd, client, args):
 
     # 상태에서 필요한 정보 추출
-    collision_info = client.collision_info
+    collision_info = client.simGetCollisionInfo()
 
     # 보상 초기값
     reward = 0.0

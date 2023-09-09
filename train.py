@@ -55,23 +55,23 @@ for epoch in range(args.epochs):
     pcd_global = merge_point_clouds(pcd_global, getPointCloud(client), client)
 
     rgb1 = getRGBImage(client)
-    rgb1 = torch.from_numpy(rgb1).to(device)
+    rgb1 = torch.from_numpy(rgb1).unsqueeze(dim=0).permute(0, 3, 1, 2).float().to(device)
 
     status = "running"
     start_time = time.time()
     while(status == "running"): 
         episode_step += 1
         qval = model1(rgb1)
-        qval = qval.data.numpy()
+        qval = qval.cpu().data.numpy()
 
         x, y, z, radian, action = calcValues(qval, args)
         
-        client.moveToPositionAsync(x, y, z, args["drone"].defualt_velocity, 
+        client.moveToPositionAsync(x, y, z, args["drone"].default_velocity, 
                                    drivetrain=airsim.DrivetrainType.MaxDegreeOfFreedom, 
                                    yaw_mode=airsim.YawMode(False, clacDuration(args["drone"].yaw_rate, radian))).join()
 
         rgb2 = getRGBImage(client)
-        rgb2 = torch.from_numpy(rgb2).to(device)
+        rgb2 = torch.from_numpy(rgb2).unsqueeze(dim=0).permute(0, 3, 1, 2).float().to(device)
 
         curr_pcd = merge_point_clouds(pcd_global, getPointCloud(client), client)
         reward = calcReward(map_pcd, pcd_global, curr_pcd, client, args)
@@ -85,11 +85,11 @@ for epoch in range(args.epochs):
         
         if len(replay) > args.batch_size:
             minibatch = random.sample(replay, args.batch_size)
-            rgb1_batch   = torch.cat([i1 for (i1,i2,a,r,d) in minibatch]).to(device)
-            rgb2_batch   = torch.cat([i2 for (i1,i2,a,r,d) in minibatch]).to(device)
-            action_batch = torch.Tensor([a for (i1,i2,a,r,d) in minibatch])
-            reward_batch = torch.Tensor([r for (i1,i2,a,r,d) in minibatch])
-            done_batch   = torch.Tensor([d for (i1,i2,a,r,d) in minibatch])
+            rgb1_batch   = torch.cat([i1 for (i1,i2,a,r,d) in minibatch], dim=0).to(device)
+            rgb2_batch   = torch.cat([i2 for (i1,i2,a,r,d) in minibatch], dim=0).to(device)
+            action_batch = torch.Tensor([a for (i1,i2,a,r,d) in minibatch]).to(device)
+            reward_batch = torch.Tensor([r for (i1,i2,a,r,d) in minibatch]).to(device)
+            done_batch   = torch.Tensor([d for (i1,i2,a,r,d) in minibatch]).to(device)
 
             Q1 = model1(rgb1_batch) 
             with torch.no_grad():
@@ -106,18 +106,16 @@ for epoch in range(args.epochs):
             if episode_step % args.sync_freq == 0: 
                 model2.load_state_dict(model1.state_dict())
                 torch.save(model1.state_dict(), os.path.join(job_dir, f'{args.model_name}_{epoch}.pth'))
+                
+        status = calcStatus(reward, (time.time() - start_time), args)
 
-        if reward != -1 or args.max_time > (time.time() - start_time):
-            status = "stop"
-
-        if epoch % args.eval_freq == 0:
-            client.reset()
-            acc = getAccuracy(model1, client, map_pcd, args)
-            print(f"validation accuracy : {acc}")
-            if best_acc < acc:
-                best_acc = acc
-                print("Save new best model...")
-                torch.save(model1.state_dict(), os.path.join(job_dir, 'best_accurracy.pth'))
+    if epoch % args.eval_freq == 0 and epoch != 0:
+        client.reset()
+        acc = getAccuracy(model1, client, map_pcd, args)
+        if best_acc < acc:
+            best_acc = acc
+            print("Save new best model...")
+            torch.save(model1.state_dict(), os.path.join(job_dir, 'best_accurracy.pth'))
 
 client.enableApiControl(False)
 losses = np.array(losses)

@@ -151,7 +151,8 @@ def pcd_to_voxel_tensor(pcd):
    return tensor
 
 def getMapPointCloud(client, voxel_size):
-   binvox_path = os.path.join("maps", f"map-{voxel_size}.binvox")
+   curr_dir = "\\".join(os.path.dirname(os.path.abspath(__file__)).split("\\")[:-1])
+   binvox_path = os.path.join(curr_dir, "maps", f"map-{voxel_size}.binvox")
    if not os.path.exists(binvox_path):
       print("Create map voxel...")
       center = airsim.Vector3r(0, 0, 0)
