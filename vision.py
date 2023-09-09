@@ -17,15 +17,6 @@ import utils.binvox_rw as binvox_rw
 
 from config.default import args
 
-# Constants for visualization
-MIN_DEPTH_METERS = 0
-MAX_DEPTH_METERS = 100
-   
-projectionMatrix = np.array([[-0.501202762, 0.000000000, 0.000000000, 0.000000000],
-                              [0.000000000, -0.501202762, 0.000000000, 0.000000000],
-                              [0.000000000, 0.000000000, 10.00000000, 100.00000000],
-                              [0.000000000, 0.000000000, -10.0000000, 0.000000000]])
-
 def savePointCloud(image, fileName, color=(0,255,0)):
    f = open(fileName, "w")
    for x in range(image.shape[0]):
@@ -114,7 +105,6 @@ def get_transformation_matrix(client):
    transformation_matrix[2, 3] = position.z_val
 
    return transformation_matrix
-
 
 def point_cloud_to_o3d(point_cloud):
    pcd = o3d.geometry.PointCloud()

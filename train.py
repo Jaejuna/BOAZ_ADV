@@ -12,6 +12,7 @@ import torch
 import numpy as np
 from math import pi
 
+from test import getAccuracy
 from model import MovePredictModel
 from vision import *
 from train_utils import *
