@@ -1,59 +1,63 @@
+import utils.setup_path as setup_path
+import airsim
+
 from math import pi
 import numpy as np
 import random
+import torch
 
-from config import args
-def test_model(model, mode='static', display=True):
-    # i = 0
-    # test_game = Gridworld(mode=mode)
-    # state_ = test_game.board.render_np().reshape(1,64) + np.random.rand(1,64)/10.0
-    # state = torch.from_numpy(state_).float()
-    # if display:
-    #     print("Initial State:")
-    #     print(test_game.display())
-    # status = 1
-    # while(status == 1): #A
-    #     qval = model(state)
-    #     qval_ = qval.data.numpy()
-    #     action_ = np.argmax(qval_) #B
-    #     action = action_set[action_]
-    #     if display:
-    #         print('Move #: %s; Taking action: %s' % (i, action))
-    #     test_game.makeMove(action)
-    #     state_ = test_game.board.render_np().reshape(1,64) + np.random.rand(1,64)/10.0
-    #     state = torch.from_numpy(state_).float()
-    #     if display:
-    #         print(test_game.display())
-    #     reward = test_game.reward()
-    #     if reward != -1:
-    #         if reward > 0:
-    #             status = 2
-    #             if display:
-    #                 print("Game won! Reward: %s" % (reward,))
-    #         else:
-    #             status = 0
-    #             if display:
-    #                 print("Game LOST. Reward: %s" % (reward,))
-    #     i += 1
-    #     if (i > 15):
-    #         if display:
-    #             print("Game lost; too many moves.")
-    #         break
-    
-    # win = True if status == 2 else False
-    # return win
-    pass
+from vision import *
+from train_utils import *
+from config.default import args
 
-# def print_accuracy(model):
-#     max_games = 1000
-#     wins = 0
-#     for i in range(max_games):
-#         win = test_model(model, mode='random', display=False)
-#         if win:
-#             wins += 1
-#     win_perc = float(wins) / float(max_games)
-#     print("Games played: {0}, # of wins: {1}".format(max_games,wins))
-#     print("Win percentage: {}%".format(100.0*win_perc))
+def test_model(model, client, map_pcd):
+    pcd_global = o3d.geometry.PointCloud()
+    pcd_global = merge_point_clouds(pcd_global, getPointCloud(client), client)
+
+    rgb1 = getRGBImage(client)
+    rgb1 = torch.from_numpy(rgb1).to(args.device)
+
+    status = "running"
+    start_time = time.time()
+    while(status == "running"): 
+        qval = model(rgb1)
+        qval = qval.data.numpy()
+
+        x, y, z, radian, _ = calcValues(qval, args.epsilon)
+        
+        client.moveToPositionAsync(x, y, z, args["drone"].defualt_velocity, 
+                                   drivetrain=airsim.DrivetrainType.MaxDegreeOfFreedom, 
+                                   yaw_mode=airsim.YawMode(False, clacDuration(args["drone"].yaw_rate, radian))).join()
+
+        curr_pcd = merge_point_clouds(pcd_global, getPointCloud(client), client)
+        reward = calcReward(map_pcd, pcd_global, curr_pcd, client)
+        pcd_global = copy.deepcopy(curr_pcd)
+
+        rgb2 = getRGBImage(client)
+        rgb2 = torch.from_numpy(rgb2).to(args.device)
+        rgb1 = rgb2
+
+        if reward != -1:
+            if reward > 0:
+                status = "success"
+            else:
+                status = "fail"
+            
+        if args.max_time > (time.time() - start_time):
+            break
+
+    SlamWell = True if status == "success" else False
+    return SlamWell
+
+def getAccuracy(model, client, max_games=10000):
+    SlamWells = 0
+    for _ in range(max_games):
+        SlamWell = test_model(model, client)
+        if SlamWell:
+            SlamWells += 1
+    SlamWell_perc = float(SlamWells) / float(max_games)
+    print("Simulated times: {0}, # of SlamWell percentage: {1}".format(max_games, 100.0 * SlamWells))
+    return 100.0 * SlamWell_perc 
 
 def clacDuration(yaw_rate, radian):
     duration = (pi / radian) / (yaw_rate * pi / 180)
@@ -62,20 +66,20 @@ def clacDuration(yaw_rate, radian):
 def calcValues(qval, eps):
     action_vector = qval[:3]
     one_hot = np.zeros_like(action_vector)
-    max_value = np.argmax(action_vector)
+    action = np.argmax(action_vector)
     radian = qval[3]
 
     if random.random() < eps:
-        max_value = np.random.randint(0, args.n_classes - 1)
+        action = np.random.randint(0, args.n_classes - 1)
         radian = random.uniform(-1, 1)
         
-    one_hot[max_value] = 1
+    one_hot[action] = 1
     action_vector = one_hot * args["drone"].moving_unit
 
     if radian < -1:  radian %= -1
     elif radian > 1: radian %= 1
 
-    return *action_vector, radian
+    return *action_vector, radian, action
 
 def calcReward(map_pcd, prev_pcd, curr_pcd, client):
 

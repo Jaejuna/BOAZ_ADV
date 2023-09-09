@@ -1,5 +1,5 @@
 # use open cv to create point cloud from depth image.
-import setup_path 
+import utils.setup_path as setup_path 
 import airsim
 
 import os
@@ -13,9 +13,9 @@ import numpy as np
 import open3d as o3d
 import plotly.graph_objects as go
 
-import binvox_rw
+import utils.binvox_rw as binvox_rw
 
-from config import args
+from config.default import args
 
 # Constants for visualization
 MIN_DEPTH_METERS = 0
@@ -37,6 +37,23 @@ def savePointCloud(image, fileName, color=(0,255,0)):
         else: 
           f.write("%f %f %f %s\n" % (pt[0], pt[1], pt[2]-1, "%d %d %d" % color))
    f.close()
+
+def getRGBImage(client):
+   # Request DepthPerspective image as uncompressed float
+   responses = client.simGetImages(
+      [
+         airsim.ImageRequest("0", airsim.ImageType.Scene , False, False)
+      ]
+   )
+   rgb_response = responses[0]
+
+   # get numpy array
+   img1d = np.fromstring(rgb_response.image_data_uint8, dtype=np.uint8) 
+
+   # reshape array to 4 channel image array H X W X 3
+   rgb_img = img1d.reshape(rgb_response.height, rgb_response.width, 3)
+
+   return rgb_img
 
 def getImages(client):
    # Request DepthPerspective image as uncompressed float
@@ -72,27 +89,27 @@ def getPointCloud(client):
    return point_cloud_to_o3d(Image3D) 
 
 def get_transformation_matrix(client):
-    # 드론의 현재 위치 및 자세 정보를 얻음
-    pose = client.simGetVehiclePose()
-    position = pose.position
-    orientation = pose.orientation
-    
-    # 쿼터니언을 회전 행렬로 변환
-    rotation_matrix = airsim.to_rotation_matrix(orientation)
-    
-    # 변환 행렬 생성
-    transformation_matrix = np.eye(4)
-    transformation_matrix[:3, :3] = rotation_matrix
-    transformation_matrix[0, 3] = position.x_val
-    transformation_matrix[1, 3] = position.y_val
-    transformation_matrix[2, 3] = position.z_val
+   # 드론의 현재 위치 및 자세 정보를 얻음
+   pose = client.simGetVehiclePose()
+   position = pose.position
+   orientation = pose.orientation
+   
+   # 쿼터니언을 회전 행렬로 변환
+   rotation_matrix = airsim.to_rotation_matrix(orientation)
+   
+   # 변환 행렬 생성
+   transformation_matrix = np.eye(4)
+   transformation_matrix[:3, :3] = rotation_matrix
+   transformation_matrix[0, 3] = position.x_val
+   transformation_matrix[1, 3] = position.y_val
+   transformation_matrix[2, 3] = position.z_val
 
-    return transformation_matrix
+   return transformation_matrix
 
 def point_cloud_to_o3d(point_cloud):
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(point_cloud.reshape(-1, 3))
-    return pcd
+   pcd = o3d.geometry.PointCloud()
+   pcd.points = o3d.utility.Vector3dVector(point_cloud.reshape(-1, 3))
+   return pcd
 
 def merge_point_clouds(cloud1, cloud2, client):
    source = copy.deepcopy(cloud1)
@@ -134,7 +151,7 @@ def pcd_to_voxel_tensor(pcd):
    return tensor
 
 def getMapPointCloud(client):
-   binvox_path = os.path.join("results", "map.binvox")
+   binvox_path = os.path.join("maps", "map.binvox")
    if not os.path.exists(binvox_path):
       c = airsim.VehicleClient()
       center = airsim.Vector3r(0, 0, 0)
