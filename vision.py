@@ -85,8 +85,17 @@ def getPointCloud(client):
    depthImage = client.simGetImage("0", airsim.ImageType.DepthPerspective)
    png = cv2.imdecode(np.frombuffer(depthImage, np.uint8) , cv2.IMREAD_UNCHANGED)
    gray = cv2.cvtColor(png, cv2.COLOR_BGR2GRAY)
-   Image3D = cv2.reprojectImageTo3D(gray, projectionMatrix)
+   Image3D = cv2.reprojectImageTo3D(gray, get_transformation_matrix(client))
    return point_cloud_to_o3d(Image3D) 
+
+def quaternion_to_rotation_matrix(q):
+   w, x, y, z = q.w_val, q.x_val, q.y_val, q.z_val
+
+   R = np.array([[1 - 2*y*y - 2*z*z,     2*x*y - 2*z*w,     2*x*z + 2*y*w],
+               [2*x*y + 2*z*w, 1 - 2*x*x - 2*z*z,     2*y*z - 2*x*w],
+               [2*x*z - 2*y*w,     2*y*z + 2*x*w, 1 - 2*x*x - 2*y*y]])
+
+   return R
 
 def get_transformation_matrix(client):
    # 드론의 현재 위치 및 자세 정보를 얻음
@@ -95,7 +104,7 @@ def get_transformation_matrix(client):
    orientation = pose.orientation
    
    # 쿼터니언을 회전 행렬로 변환
-   rotation_matrix = airsim.to_rotation_matrix(orientation)
+   rotation_matrix = quaternion_to_rotation_matrix(orientation)
    
    # 변환 행렬 생성
    transformation_matrix = np.eye(4)
@@ -105,6 +114,7 @@ def get_transformation_matrix(client):
    transformation_matrix[2, 3] = position.z_val
 
    return transformation_matrix
+
 
 def point_cloud_to_o3d(point_cloud):
    pcd = o3d.geometry.PointCloud()

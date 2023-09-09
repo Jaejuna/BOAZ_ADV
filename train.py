@@ -15,6 +15,7 @@ from math import pi
 from model import MovePredictModel
 from vision import *
 from train_utils import *
+
 from config.default import args
 
 job_dir = os.path.join("./run", datetime.now().strftime('%Y-%m-%d_%Hh%Mm%Ss'))
@@ -42,7 +43,7 @@ client.hoverAsync().join()
 
 best_acc = 0
 episode_step=0
-map_pcd = getMapPointCloud(client)
+map_pcd = getMapPointCloud(client, args.voxel_size)
 
 replay = deque(maxlen=args.mem_size)
 losses = []
@@ -63,7 +64,7 @@ for epoch in range(args.epochs):
         qval = model1(rgb1)
         qval = qval.data.numpy()
 
-        x, y, z, radian, action = calcValues(qval, args.epsilon)
+        x, y, z, radian, action = calcValues(qval, args)
         
         client.moveToPositionAsync(x, y, z, args["drone"].defualt_velocity, 
                                    drivetrain=airsim.DrivetrainType.MaxDegreeOfFreedom, 
@@ -73,7 +74,7 @@ for epoch in range(args.epochs):
         rgb2 = torch.from_numpy(rgb2).to(device)
 
         curr_pcd = merge_point_clouds(pcd_global, getPointCloud(client), client)
-        reward = calcReward(map_pcd, pcd_global, curr_pcd, client)
+        reward = calcReward(map_pcd, pcd_global, curr_pcd, client, args)
         pcd_global = copy.deepcopy(curr_pcd)
 
         done = True if reward > 0 else False
@@ -111,7 +112,7 @@ for epoch in range(args.epochs):
 
         if epoch % args.eval_freq == 0:
             client.reset()
-            acc = getAccuracy(model1, client, map_pcd)
+            acc = getAccuracy(model1, client, map_pcd, args)
             print(f"validation accuracy : {acc}")
             if best_acc < acc:
                 best_acc = acc

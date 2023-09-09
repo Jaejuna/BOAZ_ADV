@@ -8,9 +8,8 @@ import torch
 
 from vision import *
 from train_utils import *
-from config.default import args
 
-def test_model(model, client, map_pcd):
+def test_model(model, client, map_pcd, args):
     pcd_global = o3d.geometry.PointCloud()
     pcd_global = merge_point_clouds(pcd_global, getPointCloud(client), client)
 
@@ -49,10 +48,10 @@ def test_model(model, client, map_pcd):
     SlamWell = True if status == "success" else False
     return SlamWell
 
-def getAccuracy(model, client, max_games=10000):
+def getAccuracy(model, client, map_pcd, args, max_games=10000):
     SlamWells = 0
     for _ in range(max_games):
-        SlamWell = test_model(model, client)
+        SlamWell = test_model(model, client, map_pcd, args)
         if SlamWell:
             SlamWells += 1
     SlamWell_perc = float(SlamWells) / float(max_games)
@@ -63,13 +62,13 @@ def clacDuration(yaw_rate, radian):
     duration = (pi / radian) / (yaw_rate * pi / 180)
     return duration
 
-def calcValues(qval, eps):
+def calcValues(qval, args):
     action_vector = qval[:3]
     one_hot = np.zeros_like(action_vector)
     action = np.argmax(action_vector)
     radian = qval[3]
 
-    if random.random() < eps:
+    if random.random() < args.epsilon:
         action = np.random.randint(0, args.n_classes - 1)
         radian = random.uniform(-1, 1)
         
@@ -81,7 +80,7 @@ def calcValues(qval, eps):
 
     return *action_vector, radian, action
 
-def calcReward(map_pcd, prev_pcd, curr_pcd, client):
+def calcReward(map_pcd, prev_pcd, curr_pcd, client, args):
 
     # 상태에서 필요한 정보 추출
     collision_info = client.collision_info
