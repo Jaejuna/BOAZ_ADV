@@ -17,16 +17,18 @@ import utils.binvox_rw as binvox_rw
 
 from config.default import args
 
-def savePointCloud(image, fileName, color=(0,255,0)):
+def savePointCloud(depth_img, rgb_img, fileName, color=(0,255,0)):
+   assert depth_img.shape == rgb_img, "depth image and rgb_img must have same shape"
    f = open(fileName, "w")
-   for x in range(image.shape[0]):
-     for y in range(image.shape[1]):
-        pt = image[x,y]
-        if (math.isinf(pt[0]) or math.isnan(pt[0])):
-          # skip it
-          None
+   for x in range(depth_img.shape[0]):
+     for y in range(depth_img.shape[1]):
+        depth = depth_img[x,y]
+        rgb = tuple(rgb_img[x,y,:])
+        if (math.isinf(depth[0]) or math.isnan(depth[0])):
+            # skip it
+            pass
         else: 
-          f.write("%f %f %f %s\n" % (pt[0], pt[1], pt[2]-1, "%d %d %d" % color))
+            f.write("%f %f %f %s\n" % (depth[0], depth[1], depth[2]-1, "%d %d %d" % rgb))
    f.close()
 
 def getRGBImage(client):
@@ -81,8 +83,19 @@ def getImages(client):
 
 def getPointCloud(client):
    # Get depth data from AirSim
-   responses = client.simGetImages([airsim.ImageRequest("0", airsim.ImageType.DepthPerspective, True, False)])
-   depth_response = responses[0]
+   responses = client.simGetImages(
+      [
+         airsim.ImageRequest("0", airsim.ImageType.Scene , False, False),
+         airsim.ImageRequest("0", airsim.ImageType.DepthPerspective, True, False),
+      ]
+   )
+   rgb_response, depth_response = responses[0], responses[1]
+
+   # get numpy array
+   img1d = np.fromstring(rgb_response.image_data_uint8, dtype=np.uint8) 
+
+   # reshape array to 4 channel image array H X W X 3
+   rgb_img = img1d.reshape(rgb_response.height, rgb_response.width, 3)
    
    # Convert depth data to 2D array
    depth_img_in_meters = airsim.list_to_2d_float_array(depth_response.image_data_float, depth_response.width, depth_response.height)
@@ -92,7 +105,7 @@ def getPointCloud(client):
    depth_16bit = np.clip(depth_img_in_meters * 1000, 0, 65535).astype('uint16')
    gray = cv2.cvtColor(depth_16bit, cv2.COLOR_BGR2GRAY)
    Image3D = cv2.reprojectImageTo3D(gray, get_transformation_matrix(client))
-   return point_cloud_to_o3d(Image3D)
+   return point_cloud_to_o3d(Image3D, rgb_img)
 
 def quaternion_to_rotation_matrix(q):
    w, x, y, z = q.w_val, q.x_val, q.y_val, q.z_val
@@ -121,9 +134,11 @@ def get_transformation_matrix(client):
 
    return transformation_matrix
 
-def point_cloud_to_o3d(point_cloud):
+def point_cloud_to_o3d(point_cloud, rgb_img):
+   flattened_rgb = rgb_img.reshape(-1, 3)
    pcd = o3d.geometry.PointCloud()
    pcd.points = o3d.utility.Vector3dVector(point_cloud.reshape(-1, 3))
+   pcd.colors = o3d.utility.Vector3dVector(flattened_rgb / 255.0)
    return pcd
 
 def mergePointClouds(cloud1, cloud2, client):
@@ -136,7 +151,7 @@ def mergePointClouds(cloud1, cloud2, client):
    reg_p2p = o3d.pipelines.registration.registration_icp(
                      source, target, threshold, T, 
                      o3d.pipelines.registration.TransformationEstimationPointToPoint())
-   
+
    # 변환 행렬을 사용하여 source 포인트 클라우드를 변환
    source.transform(reg_p2p.transformation)
 
