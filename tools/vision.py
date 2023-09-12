@@ -17,19 +17,8 @@ import utils.binvox_rw as binvox_rw
 
 from config.default import args
 
-def savePointCloud(depth_img, rgb_img, fileName, color=(0,255,0)):
-   assert depth_img.shape == rgb_img, "depth image and rgb_img must have same shape"
-   f = open(fileName, "w")
-   for x in range(depth_img.shape[0]):
-     for y in range(depth_img.shape[1]):
-        depth = depth_img[x,y]
-        rgb = tuple(rgb_img[x,y,:])
-        if (math.isinf(depth[0]) or math.isnan(depth[0])):
-            # skip it
-            pass
-        else: 
-            f.write("%f %f %f %s\n" % (depth[0], depth[1], depth[2]-1, "%d %d %d" % rgb))
-   f.close()
+def savePointCloud(pcd, fileName):
+   o3d.io.write_point_cloud(fileName, pcd)
 
 def getRGBImage(client):
    # Request DepthPerspective image as uncompressed float
@@ -74,65 +63,38 @@ def getImages(client):
 
    return rgb_img, depth_img
 
-# def getPointCloud(client):
-#    depthImage = client.simGetImage("0", airsim.ImageType.DepthPerspective)
-#    png = cv2.imdecode(np.frombuffer(depthImage, np.uint8) , cv2.IMREAD_UNCHANGED)
-#    gray = cv2.cvtColor(png, cv2.COLOR_BGR2GRAY)
-#    Image3D = cv2.reprojectImageTo3D(gray, get_transformation_matrix(client))
-#    return point_cloud_to_o3d(Image3D) 
+def getPointCloudByIntrinsic(client):
+   rgb_img, depth_img = getImages(client)
+
+   color = o3d.geometry.Image(rgb_img)
+   depth = o3d.geometry.Image(depth_img)
+
+   rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(
+      color, depth, depth_scale=1000.0, depth_trunc=40.0, convert_rgb_to_intensity=False
+   )
+
+   intrinsics = o3d.camera.PinholeCameraIntrinsic(1280, 720, *get_intrinsic())
+   point_cloud = o3d.geometry.PointCloud.create_from_rgbd_image(rgbd_image, intrinsics)
+   return point_cloud
+
+def get_intrinsic():
+   # 하드 코딩한 결과
+   # 다른 방법 없음
+   w = 224
+   h = 224 
+   fov = 90
+
+   fx = w / (2 * math.tan(fov / 2))
+   fy = h / (2 * math.tan(fov / 2))
+   cx = w / 2
+   cy = h / 2
+
+   return (fx, fy, cx, cy)
 
 def getPointCloud(client):
-   # Get depth data from AirSim
-   responses = client.simGetImages(
-      [
-         airsim.ImageRequest("0", airsim.ImageType.Scene , False, False),
-         airsim.ImageRequest("0", airsim.ImageType.DepthPerspective, True, False),
-      ]
-   )
-   rgb_response, depth_response = responses[0], responses[1]
-
-   # get numpy array
-   img1d = np.fromstring(rgb_response.image_data_uint8, dtype=np.uint8) 
-
-   # reshape array to 4 channel image array H X W X 3
-   rgb_img = img1d.reshape(rgb_response.height, rgb_response.width, 3)
-   
-   # Convert depth data to 2D array
-   depth_img_in_meters = airsim.list_to_2d_float_array(depth_response.image_data_float, depth_response.width, depth_response.height)
-   depth_img_in_meters = depth_img_in_meters.reshape(depth_response.height, depth_response.width, 1)
-   
-   # Use cv2 to convert depth image to 3D point cloud
-   depth_16bit = np.clip(depth_img_in_meters * 1000, 0, 65535).astype('uint16')
-   gray = cv2.cvtColor(depth_16bit, cv2.COLOR_BGR2GRAY)
-   Image3D = cv2.reprojectImageTo3D(gray, get_transformation_matrix(client))
-   return point_cloud_to_o3d(Image3D, rgb_img)
-
-def quaternion_to_rotation_matrix(q):
-   w, x, y, z = q.w_val, q.x_val, q.y_val, q.z_val
-
-   R = np.array([[1 - 2*y*y - 2*z*z,     2*x*y - 2*z*w,     2*x*z + 2*y*w],
-               [2*x*y + 2*z*w, 1 - 2*x*x - 2*z*z,     2*y*z - 2*x*w],
-               [2*x*z - 2*y*w,     2*y*z + 2*x*w, 1 - 2*x*x - 2*y*y]])
-
-   return R
-
-def get_transformation_matrix(client):
-   # 드론의 현재 위치 및 자세 정보를 얻음
-   pose = client.simGetVehiclePose()
-   position = pose.position
-   orientation = pose.orientation
-   
-   # 쿼터니언을 회전 행렬로 변환
-   rotation_matrix = quaternion_to_rotation_matrix(orientation)
-   
-   # 변환 행렬 생성
-   transformation_matrix = np.eye(4)
-   transformation_matrix[:3, :3] = rotation_matrix
-   transformation_matrix[0, 3] = position.x_val
-   transformation_matrix[1, 3] = position.y_val
-   transformation_matrix[2, 3] = position.z_val
-
-   return transformation_matrix
+   rgb_img, depth_img = getImages(client)
+   point_cloud = cv2.reprojectImageTo3D(depth_img, get_proj_matrix(client))
+   return point_cloud_to_o3d(point_cloud, rgb_img)
 
 def point_cloud_to_o3d(point_cloud, rgb_img):
    flattened_rgb = rgb_img.reshape(-1, 3)
@@ -141,13 +103,19 @@ def point_cloud_to_o3d(point_cloud, rgb_img):
    pcd.colors = o3d.utility.Vector3dVector(flattened_rgb / 255.0)
    return pcd
 
+def get_proj_matrix(client):
+   # 드론의 현재 위치 및 자세 정보를 얻음
+   camera_info = client.simGetCameraInfo("0")
+   proj_matrix = np.array(camera_info.proj_mat.matrix)
+   return proj_matrix
+
 def mergePointClouds(cloud1, cloud2, client):
    source = copy.deepcopy(cloud1)
    target = copy.deepcopy(cloud2)
 
    # coarse-to-fine manner의 Iterative Closest Point(ICP) 알고리즘을 사용하여 두 포인트 클라우드를 정합
    threshold = 0.02
-   T = get_transformation_matrix(client)
+   T = get_proj_matrix(client)
    reg_p2p = o3d.pipelines.registration.registration_icp(
                      source, target, threshold, T, 
                      o3d.pipelines.registration.TransformationEstimationPointToPoint())

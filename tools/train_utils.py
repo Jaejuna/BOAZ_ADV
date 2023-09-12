@@ -32,7 +32,7 @@ def calcValues(qval, args):
     
     return *action_vector, radian, action
 
-def calcStatus(reward, args):
+def calcStatus(reward):
     status = "running"
     if abs(reward) != 2:
         if reward > 0:
@@ -107,3 +107,10 @@ def setRandomPose(client, args):
         # 충돌 정보 확인
         collision_info = client.simGetCollisionInfo()
         collision = collision_info.has_collided
+
+def putDataIntoQueue(data_queue, pcd):
+    data = {
+        "points" : list(pcd.points),
+        "colors" : list(pcd.colors)
+    }
+    data_queue.put(data)
