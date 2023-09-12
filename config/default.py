@@ -5,6 +5,12 @@ drone = edict()
 drone.yaw_rate = 90
 drone.default_velocity = 5
 drone.moving_unit = 0.5
+drone.set_random_pose = True
+drone.x_range = 1000
+drone.y_range = 1000
+drone.z_range = 5
+drone.MIN_DEPTH_METERS = 0
+drone.MAX_DEPTH_METERS = 100
 
 # main
 args = edict(drone=drone)

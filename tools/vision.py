@@ -51,7 +51,7 @@ def getImages(client):
    responses = client.simGetImages(
       [
          airsim.ImageRequest("0", airsim.ImageType.Scene , False, False),
-         airsim.ImageRequest("0", airsim.ImageType.DepthVis, True, False),
+         airsim.ImageRequest("0", airsim.ImageType.DepthPerspective, True, False),
       ]
    )
    rgb_response, depth_response = responses[0], responses[1]
@@ -72,12 +72,27 @@ def getImages(client):
 
    return rgb_img, depth_img
 
+# def getPointCloud(client):
+#    depthImage = client.simGetImage("0", airsim.ImageType.DepthPerspective)
+#    png = cv2.imdecode(np.frombuffer(depthImage, np.uint8) , cv2.IMREAD_UNCHANGED)
+#    gray = cv2.cvtColor(png, cv2.COLOR_BGR2GRAY)
+#    Image3D = cv2.reprojectImageTo3D(gray, get_transformation_matrix(client))
+#    return point_cloud_to_o3d(Image3D) 
+
 def getPointCloud(client):
-   depthImage = client.simGetImage("0", airsim.ImageType.DepthPerspective)
-   png = cv2.imdecode(np.frombuffer(depthImage, np.uint8) , cv2.IMREAD_UNCHANGED)
-   gray = cv2.cvtColor(png, cv2.COLOR_BGR2GRAY)
+   # Get depth data from AirSim
+   responses = client.simGetImages([airsim.ImageRequest("0", airsim.ImageType.DepthPerspective, True, False)])
+   depth_response = responses[0]
+   
+   # Convert depth data to 2D array
+   depth_img_in_meters = airsim.list_to_2d_float_array(depth_response.image_data_float, depth_response.width, depth_response.height)
+   depth_img_in_meters = depth_img_in_meters.reshape(depth_response.height, depth_response.width, 1)
+   
+   # Use cv2 to convert depth image to 3D point cloud
+   depth_16bit = np.clip(depth_img_in_meters * 1000, 0, 65535).astype('uint16')
+   gray = cv2.cvtColor(depth_16bit, cv2.COLOR_BGR2GRAY)
    Image3D = cv2.reprojectImageTo3D(gray, get_transformation_matrix(client))
-   return point_cloud_to_o3d(Image3D) 
+   return point_cloud_to_o3d(Image3D)
 
 def quaternion_to_rotation_matrix(q):
    w, x, y, z = q.w_val, q.x_val, q.y_val, q.z_val
@@ -111,7 +126,7 @@ def point_cloud_to_o3d(point_cloud):
    pcd.points = o3d.utility.Vector3dVector(point_cloud.reshape(-1, 3))
    return pcd
 
-def merge_point_clouds(cloud1, cloud2, client):
+def mergePointClouds(cloud1, cloud2, client):
    source = copy.deepcopy(cloud1)
    target = copy.deepcopy(cloud2)
 
@@ -156,7 +171,7 @@ def getMapPointCloud(client, voxel_size):
    if not os.path.exists(binvox_path):
       print("Create map voxel...")
       center = airsim.Vector3r(0, 0, 0)
-      client.simCreateVoxelGrid(center, 100, 100, 100, voxel_size, binvox_path)
+      client.simCreateVoxelGrid(center, 1000, 1000, 100, voxel_size, binvox_path)
 
    # 복셀 데이터 읽기
    with open(binvox_path, 'rb') as f:
