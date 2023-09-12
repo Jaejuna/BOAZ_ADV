@@ -6,6 +6,7 @@ from collections import deque
 import copy
 import random
 from datetime import datetime
+import multiprocessing
 
 import torch
 import numpy as np
@@ -15,11 +16,17 @@ from tools.test import getAccuracy
 from tools.models import MovePredictModel
 from tools.vision import *
 from tools.train_utils import *
+from tools.live_visualization import live_visualization
 
 from config.default import args
 
 job_dir = os.path.join("./run", datetime.now().strftime('%Y-%m-%d_%Hh%Mm%Ss'))
 os.makedirs(job_dir, exist_ok=True)
+
+if args.live_visualization:
+    data_queue = multiprocessing.Queue()  
+    live_vis_process = multiprocessing.Process(target=live_visualization, args=(data_queue,))
+    live_vis_process.start()
 
 device = args.device
 
@@ -54,13 +61,16 @@ for epoch in range(args.epochs):
         setRandomPose(client, args)
 
     pcd_global = o3d.geometry.PointCloud()
-    pcd_global = mergePointClouds(pcd_global, getPointCloud(client), client)
+    curr_global = mergePointClouds(pcd_global, getPointCloud(client), client)
+    pcd_global = copy.deepcopy(curr_pcd)
+    if args.live_visualization:
+        data_queue.put(pcd_global)
 
     rgb1 = getRGBImage(client)
     rgb1 = torch.from_numpy(rgb1).unsqueeze(dim=0).permute(0, 3, 1, 2).float().to(device)
 
     status = "running"
-    start_time = time.time()
+    running_time = 0
     while(status == "running"): 
         episode_step += 1
         qval = model1(rgb1)
@@ -68,16 +78,20 @@ for epoch in range(args.epochs):
 
         x, y, z, radian, action = calcValues(qval, args)
         
+        move_start_time = time.time()
         client.moveToPositionAsync(x, y, z, args["drone"].default_velocity, 
                                    drivetrain=airsim.DrivetrainType.MaxDegreeOfFreedom, 
                                    yaw_mode=airsim.YawMode(False, clacDuration(args["drone"].yaw_rate, radian))).join()
+        running_time += time.time() - move_start_time
 
         rgb2 = getRGBImage(client)
         rgb2 = torch.from_numpy(rgb2).unsqueeze(dim=0).permute(0, 3, 1, 2).float().to(device)
 
         curr_pcd = mergePointClouds(pcd_global, getPointCloud(client), client)
-        reward = calcReward(map_pcd, pcd_global, curr_pcd, client, args)
+        reward = calcReward(map_pcd, pcd_global, curr_pcd, client, running_time, args)
         pcd_global = copy.deepcopy(curr_pcd)
+        if args.live_visualization:
+            data_queue.put(pcd_global)
 
         done = True if reward > 0 else False
         exp =  (rgb1, rgb2, action, reward, done)
@@ -108,8 +122,8 @@ for epoch in range(args.epochs):
             if episode_step % args.sync_freq == 0: 
                 model2.load_state_dict(model1.state_dict())
                 torch.save(model1.state_dict(), os.path.join(job_dir, f'{args.model_name}_{epoch}.pth'))
-                
-        status = calcStatus(reward, (time.time() - start_time), args)
+
+        status = calcStatus(reward, args)
 
     if epoch % args.eval_freq == 0 and epoch != 0:
         client.reset()
@@ -119,6 +133,9 @@ for epoch in range(args.epochs):
             print("Save new best model...")
             torch.save(model1.state_dict(), os.path.join(job_dir, 'best_accurracy.pth'))
 
+
+if args.live_visualization:
+    live_vis_process.join()
 client.enableApiControl(False)
 losses = np.array(losses)
 np.save(os.path.join(job_dir, "losses.npy"), losses)

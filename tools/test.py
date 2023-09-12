@@ -10,7 +10,7 @@ from tools.train_utils import *
 
 def test(model, client, map_pcd, args):
     pcd_global = o3d.geometry.PointCloud()
-    pcd_global = merge_point_clouds(pcd_global, getPointCloud(client), client)
+    pcd_global = mergePointClouds(pcd_global, getPointCloud(client), client)
 
     rgb1 = getRGBImage(client)
     rgb1 = torch.from_numpy(rgb1).unsqueeze(dim=0).permute(0, 3, 1, 2).float().to(args.device)
@@ -27,7 +27,7 @@ def test(model, client, map_pcd, args):
                                    drivetrain=airsim.DrivetrainType.MaxDegreeOfFreedom, 
                                    yaw_mode=airsim.YawMode(False, clacDuration(args["drone"].yaw_rate, radian))).join()
 
-        curr_pcd = merge_point_clouds(pcd_global, getPointCloud(client), client)
+        curr_pcd = mergePointClouds(pcd_global, getPointCloud(client), client)
         reward = calcReward(map_pcd, pcd_global, curr_pcd, client, args)
         pcd_global = copy.deepcopy(curr_pcd)
 

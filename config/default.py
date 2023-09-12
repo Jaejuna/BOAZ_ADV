@@ -28,7 +28,7 @@ args.checkpoint = None ## Load chekpoint
 args.batch_size = 4 # batch size
 args.mem_size = 50
 args.epochs = 5000  
-args.max_time = 60  
+args.max_time = 180  
 args.sync_freq = 500
 
 args.eval_freq = 50
@@ -39,3 +39,5 @@ args.voxel_size = 0.5
 args.model_name = ""
 
 args.eval_steps = 100
+
+args.live_visualization = True

@@ -30,21 +30,18 @@ def calcValues(qval, args):
     if radian < -1:  radian %= -1
     elif radian > 1: radian %= 1
     
-
     return *action_vector, radian, action
 
-def calcStatus(reward, elapsedTime, args):
+def calcStatus(reward, args):
     status = "running"
-    if args.max_time > elapsedTime:
-        status = "time out"
-        if reward != -1:
-            if reward > 0:
-                status = "work well"
-            else:
-                status = "work bad"
+    if abs(reward) != 2:
+        if reward > 0:
+            status = "work well"
+        else:
+            status = "work bad"
     return status
 
-def calcReward(map_pcd, prev_pcd, curr_pcd, client, args):
+def calcReward(map_pcd, prev_pcd, curr_pcd, client, running_time, args):
 
     # 상태에서 필요한 정보 추출
     collision_info = client.simGetCollisionInfo()
@@ -65,31 +62,29 @@ def calcReward(map_pcd, prev_pcd, curr_pcd, client, args):
     print("mse_mc:", mse_mc)
     print("mse_pc:", mse_pc)
     
-    # 만약 드론이 충돌한 경우
+    # 드론이 충돌한 경우
     if collision_info.has_collided:
-        reward -= -10.0  # 큰 음수 값으로 보상
+        reward -= 20.0  # 충돌 시 큰 음수 값으로 보상
         print("드론이 충돌한 경우")
-    # 전에 만든 맵과 현재 만든 맵의 차이가 크면 작은 음의 보상
-    # 계속해서 진행하도록
+    elif args.max_time >= running_time:
+        reward -= 10.0
+        print("시간 초과")
+
+    # 전에 만든 맵과 현재 만든 맵의 차이에 따른 보상
     if mse_pc >= args.voxel_threshold:
         reward -= 1.0
         print("전에 만든 맵과 현재 만든 맵의 차이가 크면 작은 음의 보상")
-    # 전에 만든 맵과 현재 만든 맵의 차이가 작으면 큰 음의 보상
-    # 드론이 조금 움직인 것이므로 
     elif mse_pc < args.voxel_threshold:
         reward -= 10.0
         print("전에 만든 맵과 현재 만든 맵의 차이가 작으면 큰 음의 보상")
-    # 전체 맵과 현재 만든 맵의 차이가 크면 작은 음의 보상
-    # 계속해서 진행하도록
-    elif mse_mc >= args.voxel_threshold:
+
+    # 전체 맵과 현재 만든 맵의 차이에 따른 보상
+    if mse_mc >= args.voxel_threshold:
         reward -= 1.0
         print("전체 맵과 현재 만든 맵의 차이가 크면 작은 음의 보상")
-    # 전체 맵과 현재 만든 맵의 차이가 작으면 큰 양의 보상
-    # 전체 맵을 잘 만든 것이므로
-    if mse_mc < args.voxel_threshold:
-        reward = 10.0
+    elif mse_mc < args.voxel_threshold:
+        reward += 10.0
         print("전체 맵과 현재 만든 맵의 차이가 작으면 큰 양의 보상")
-
 
     print("최종 reward:", reward)
 

@@ -220,4 +220,3 @@ getPointCloudForTest(client, "./results/cloud1.asc")
 # center = airsim.Vector3r(0, 0, 0)
 # client.simCreateVoxelGrid(center, 1000, 1000, 100, 0.5, binvox_path)
 # print("done!")
-
