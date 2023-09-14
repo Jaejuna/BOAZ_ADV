@@ -32,6 +32,17 @@ def getImages_(client):
 
    return rgb_img, depth_img
 
+def savepointcloud(image, filename):
+   f = open(filename, "w+")
+   for x in range(image.shape[0]):
+      for y in range(image.shape[1]):
+         pt = image[x, y]
+         if math.isinf(pt[0]) or math.isnan(pt[0]) or pt[0] > 10000 or pt[1] > 10000 or pt[2] > 10000:
+               None
+         else:
+               f.write("%f %f %f %s\n" % (pt[0], pt[1], pt[2] - 1, "0 255 0"))
+   f.close()
+
 def DepthConversion(PointDepth, f):
    H = PointDepth.shape[0]
    W = PointDepth.shape[1]
@@ -40,58 +51,51 @@ def DepthConversion(PointDepth, f):
    columns, rows = np.meshgrid(np.linspace(0, W-1, num=W), np.linspace(0, H-1, num=H))
    DistanceFromCenter = ((rows - i_c)**2 + (columns - j_c)**2)**(0.5)
    PlaneDepth = PointDepth / (1 + (DistanceFromCenter / f)**2)**(0.5)
-   return PlaneDepth.astype(np.uint16)
+   return PlaneDepth
+
+def generatepointcloud(depth):
+   Fx, Fy, Cx, Cy = get_intrinsic_()
+   rows, cols = depth.shape
+   c, r = np.meshgrid(np.arange(cols), np.arange(rows), sparse=True)
+   valid = (depth > 0) & (depth < 255)
+   z = 1000 * np.where(valid, depth / 256.0, np.nan)
+   x = np.where(valid, z * (c - Cx) / Fx, 0)
+   y = np.where(valid, z * (r - Cy) / Fy, 0)
+   return np.dstack((x, y, z))
 
 def getPointCloudByIntrinsic_(client, save=True):
-   rgb_img, depth_img = getImages_(client)
-   if save:
-    cv2.imwrite("./results/rgb.png", rgb_img)
-    cv2.imwrite("./results/depth.png", depth_img.astype('uint16'))
+   responses = client.simGetImages(
+      [
+         airsim.ImageRequest("0", airsim.ImageType.Scene , False, False),
+         airsim.ImageRequest("0", airsim.ImageType.DepthPerspective, True, False),
+      ]
+   )
+   rgb_response, depth_response = responses[0], responses[1]
 
-   fx, fy, cx, cy = get_intrinsic_()
-   rgb_img = cv2.cvtColor(rgb_img, cv2.COLOR_BGR2RGB)
-   # depth_img = DepthConversion(depth_img, fx)
+   rgb = np.fromstring(rgb_response.image_data_uint8, dtype=np.uint8) 
+   rgb = rgb.reshape(rgb_response.height, rgb_response.width, 3)
+   rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
 
-   # color = o3d.geometry.Image(rgb_img)
-   # depth = o3d.geometry.Image(depth_img)
-
-   # rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(
-   #    color, depth, depth_scale=1000.0, depth_trunc=6.0, convert_rgb_to_intensity=False
-   # )
-
-   # intrinsics = o3d.camera.PinholeCameraIntrinsic(224, 224, fx, fy, cx, cy)
-   # point_cloud = o3d.geometry.PointCloud.create_from_rgbd_image(rgbd_image, intrinsics)
-
-   # Convert depth to 3D points
-   u = np.linspace(0, 223, 224)
-   v = np.linspace(0, 223, 224)
-   u, v = np.meshgrid(u, v)
-
-   x = (u - cx) * depth_img / fx
-   y = (v - cy) * depth_img / fy
-   z = depth_img.squeeze()  # Remove the third dimension
-
-   # Convert coordinates using depth
-   x = x * z
-   y = y * z
+   depth = np.array(depth_response.image_data_float, dtype=np.float)
+   depth[depth > 255] = 255
+   depth = np.reshape(depth, (depth_response.height, depth_response.width))
+   points1 = generatepointcloud(depth)
+   depth = DepthConversion(depth, rgb_response.height / (2 * math.tan(90 / 2)))
+   points2 = generatepointcloud(depth)
+   points = (points1 + points2) / 2
    
-   x = x.ravel()
-   y = y.ravel()
-   z = z.ravel()     
+   mask = ~np.isnan(points).any(axis=2) & ~np.isinf(points).any(axis=2)
+   points = points[mask]
+   rgb = rgb[mask]
 
-   # Create point cloud from the 3D points
-   points = np.hstack((x.reshape(-1,1), y.reshape(-1,1), z.reshape(-1,1)))
-
-   # Convert the point cloud to Open3D format
    point_cloud = o3d.geometry.PointCloud()
-   point_cloud.points = o3d.utility.Vector3dVector(points)
-   point_cloud.points = o3d.utility.Vector3dVector(rgb_img.reshape(-1, 3))
-
+   point_cloud.points = o3d.utility.Vector3dVector(points.reshape(-1, 3))
+   point_cloud.colors = o3d.utility.Vector3dVector(rgb.reshape(-1, 3) / 255.0)
+   point_cloud = point_cloud.voxel_down_sample(voxel_size=0.04) 
+   # savepointcloud(pcl, r'C:\Users\USER\Desktop\boaz\adv\RL4AirSim\results\pcl.asc')
    return point_cloud
 
-def get_intrinsic_():
-   # 하드 코딩한 결과
-   # 다른 방법 없음
+def get_intrinsic_(): 
    w = 224
    h = 224
    fov = 90
@@ -101,7 +105,44 @@ def get_intrinsic_():
    cx = w / 2
    cy = h / 2
 
-   return fx, fy, cx, cy
+   return (fx, fy, cx, cy)
+
+def mergePointClouds(cloud1, cloud2, client):
+   source = copy.deepcopy(cloud1)
+   target = copy.deepcopy(cloud2)
+
+   voxel_size=0.04
+   distance_threshold = voxel_size 
+   radius_normal = voxel_size * 2
+   radius_feature = voxel_size * 3
+   max_nn = 30
+
+   # coarse-to-fine manner의 Iterative Closest Point(ICP) 알고리즘을 사용하여 두 포인트 클라우드를 정합
+   source.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=radius_normal, max_nn=max_nn))
+   source_feature = o3d.pipelines.registration.compute_fpfh_feature(
+         source, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=max_nn))
+   
+   target.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=radius_normal, max_nn=max_nn))
+   target_feature = o3d.pipelines.registration.compute_fpfh_feature(
+         target, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=max_nn))
+
+   result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
+         source, target, source_feature, target_feature, True, distance_threshold,
+         o3d.pipelines.registration.TransformationEstimationPointToPoint(False), 3, 
+         [o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.3),
+         o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold)], 
+         o3d.pipelines.registration.RANSACConvergenceCriteria(10000000, 0.99))
+
+   refinement_result =o3d.pipelines.registration.registration_icp(
+               source, target, distance_threshold, result.transformation,
+               o3d.pipelines.registration.TransformationEstimationPointToPlane())
+
+   # 변환 행렬을 사용하여 source 포인트 클라우드를 변환
+   source = copy.deepcopy(source).transform(np.linalg.inv(refinement_result.transformation))
+
+   # 변환된 포인트 클라우드와 target 포인트 클라우드를 결합
+   merged_pcd = copy.deepcopy(source + target)
+   return merged_pcd
 
 # connect to the AirSim simulator
 client = airsim.MultirotorClient()
@@ -111,8 +152,16 @@ client.enableApiControl(True)
 client.armDisarm(True)
 client.takeoffAsync().join()
 
-client.moveToPositionAsync(-10, 10, -10, 10).join()
+# client.moveToPositionAsync(-10, 10, -10, 10).join()
 
 # depth_to_point_cloud(client)
-pcd = getPointCloudByIntrinsic_(client)
-o3d.io.write_point_cloud("./results/pcd.ply", pcd)
+client.moveToPositionAsync(-10, 10, -10, 10).join()
+pcd1 = getPointCloudByIntrinsic_(client)
+o3d.io.write_point_cloud(f"./results/pcd1.ply", pcd1)
+client.moveToPositionAsync(-10, -10, -10, 10).join()
+pcd2 = getPointCloudByIntrinsic_(client)
+o3d.io.write_point_cloud(f"./results/pcd2.ply", pcd2)
+print("merging")
+pcd3 = mergePointClouds(pcd1, pcd2, client)
+o3d.io.write_point_cloud(f"./results/pcd3.ply", pcd3)
+print("done")
