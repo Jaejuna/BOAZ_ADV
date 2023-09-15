@@ -138,10 +138,11 @@ def mergePointClouds(cloud1, cloud2, client):
                o3d.pipelines.registration.TransformationEstimationPointToPlane())
 
    # 변환 행렬을 사용하여 source 포인트 클라우드를 변환
-   source = copy.deepcopy(source).transform(np.linalg.inv(refinement_result.transformation))
+   target = copy.deepcopy(target).transform(np.linalg.inv(refinement_result.transformation))
 
    # 변환된 포인트 클라우드와 target 포인트 클라우드를 결합
    merged_pcd = copy.deepcopy(source + target)
+   merged_pcd = merged_pcd.voxel_down_sample(voxel_size=0.04) 
    return merged_pcd
 
 # connect to the AirSim simulator

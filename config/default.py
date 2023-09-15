@@ -36,7 +36,7 @@ args.eval_freq = 50
 args.voxel_threshold = 0.002
 args.voxel_size = 0.5
 
-args.model_name = ""
+args.backbone_name = "resnet101"
 
 args.eval_steps = 100
 

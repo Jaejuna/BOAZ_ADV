@@ -31,7 +31,7 @@ if __name__ == '__main__':
 
     device = args.device
 
-    model1 = MovePredictModel(num_classes=args.num_classes, backbone="resnet101")
+    model1 = MovePredictModel(num_classes=args.num_classes, backbone=args.backbone_name)
     model2 = copy.deepcopy(model1) 
     model2.load_state_dict(model1.state_dict()) 
     model1.to(device)
