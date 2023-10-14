@@ -167,3 +167,28 @@ def getMapPointCloud(client, voxel_size):
    pcd.points = o3d.utility.Vector3dVector(coords * voxel_data.scale + voxel_data.translate)
 
    return pcd
+
+def get_transformed_lidar_pc(client):
+   # raw lidar data to open3d PointCloud
+   lidar_data = client.getLidarData()
+   lidar_points = np.array([lidar_data.point_cloud[i:i+3] for i in range(0, len(lidar_data.point_cloud), 3)])
+   pcd = o3d.geometry.PointCloud()
+   pcd.points = o3d.utility.Vector3dVector(lidar_points)
+
+   # calc rotation matrix
+   orientation = lidar_data.pose.orientation
+   q0, q1, q2, q3 = orientation.w_val, orientation.x_val, orientation.y_val, orientation.z_val
+   rotation_matrix = np.array(([1-2*(q2*q2+q3*q3),2*(q1*q2-q3*q0),2*(q1*q3+q2*q0)],
+                               [2*(q1*q2+q3*q0),1-2*(q1*q1+q3*q3),2*(q2*q3-q1*q0)],
+                               [2*(q1*q3-q2*q0),2*(q2*q3+q1*q0),1-2*(q1*q1+q2*q2)]))
+   
+   # calc translation vector
+   position = lidar_data.pose.position
+   x_val, y_val, z_val = position.x_val, position.y_val, position.z_val
+   translation_vector = np.array([x_val, y_val, z_val])
+
+   # apply transform
+   transformation_matrix = np.eye(4)
+   transformation_matrix[:3, :3] = rotation_matrix
+   transformation_matrix[:3, 3] = translation_vector
+   return pcd.transform(transformation_matrix)
