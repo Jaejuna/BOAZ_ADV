@@ -50,8 +50,8 @@ def calcReward(map_voxel, map_info, prev_pcd, curr_pcd, client, running_time, ar
     reward = 0.0
 
     # 이전 포인트 클라우드와 현재 포인트 클라우드의 차이 계산
-    prev_voxel = pcd_to_voxel_tensor(prev_pcd, dims=map_info[0], map_center=map_info[1])
-    curr_voxel = pcd_to_voxel_tensor(prev_pcd + curr_pcd, dims=map_info[0], map_center=map_info[1])
+    prev_voxel, _ = pcd_to_voxel_tensor(prev_pcd, dims=map_info[0], map_center=map_info[1])
+    curr_voxel, _ = pcd_to_voxel_tensor(prev_pcd + curr_pcd, dims=map_info[0], map_center=map_info[1])
     
     # 두 포인트 클라우드의 크기를 동일하게 맞춤
     mse_mc = F.mse_loss(map_voxel, curr_voxel, reduction='mean').item()
@@ -125,5 +125,5 @@ def droneReadyState(client):
 
 def resetState(client):
     client.reset()
-    client = droneReadyState(client)
+    # client = droneReadyState(client)
     return client

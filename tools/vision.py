@@ -135,17 +135,20 @@ def pcd_to_voxel_tensor(pcd, dims=None, map_center=None):
    if dims is None:
       min_bound = voxel_grid.get_min_bound() // voxel_size
       max_bound = voxel_grid.get_max_bound() // voxel_size
-      dims = np.asarray(max_bound - min_bound, dtype=np.int)
+      dims = np.ceil(max_bound - min_bound).astype(np.int64)
 
    # 빈 텐서(모든 값이 0) 생성
    tensor = torch.zeros(*dims, dtype=torch.float32)
 
    # 복셀의 중심 포인트 얻기
    if map_center is None:
-      centers = np.asarray(voxel_grid.get_voxels(), dtype=np.float32)[:, :3]  # (num_voxels, 3)
-   indices = np.round((centers - min_bound) / voxel_size).astype(np.int)
+      centers = np.array([voxel.grid_index for voxel in voxel_grid.get_voxels()], dtype=np.float32)
+   indices = np.round((centers - min_bound) / voxel_size).astype(np.int64)
 
    # 텐서에 복셀 값 설정
+   indices[:, 0] = np.clip(indices[:, 0], 0, dims[0]-1)
+   indices[:, 1] = np.clip(indices[:, 1], 0, dims[1]-1)
+   indices[:, 2] = np.clip(indices[:, 2], 0, dims[2]-1)
    tensor[indices[:, 0], indices[:, 1], indices[:, 2]] = 1.0
    return tensor, [dims, centers]
 

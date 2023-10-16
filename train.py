@@ -46,7 +46,7 @@ if __name__ == '__main__':
 
     best_acc = 0  # 가장 높은 정확도
     episode_step=0 # 에피소드의 현재 단계
-    map_voxel, map_info = getMapVoxel(client) # 맵의 포인트 클라우드를 얻음
+    map_voxel, map_info = getMapVoxel(args.map_path) # 맵의 포인트 클라우드를 얻음
 
     replay = deque(maxlen=args.mem_size) 
     losses = []
