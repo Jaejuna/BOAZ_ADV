@@ -11,9 +11,8 @@ import torch
 import cv2
 import numpy as np
 import open3d as o3d
-import plotly.graph_objects as go
 
-import utils.binvox_rw as binvox_rw
+# import utils.binvox_rw as binvox_rw
 
 from config.default import args
 
@@ -127,46 +126,33 @@ def mergePointClouds(cloud1, cloud2, client):
    merged_pcd = source + target
    return merged_pcd
 
-def pcd_to_voxel_tensor(pcd):
+def pcd_to_voxel_tensor(pcd, dims=None, map_center=None):
    # 포인트 클라우드에서 복셀 그리드 생성
    voxel_size = args.voxel_size
    voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(pcd, voxel_size=voxel_size)
    
    # 복셀 그리드의 바운딩 박스 얻기
-   min_bound = voxel_grid.get_min_bound() // voxel_size
-   max_bound = voxel_grid.get_max_bound() // voxel_size
-   dims = np.asarray(max_bound - min_bound, dtype=np.int)
+   if dims is None:
+      min_bound = voxel_grid.get_min_bound() // voxel_size
+      max_bound = voxel_grid.get_max_bound() // voxel_size
+      dims = np.asarray(max_bound - min_bound, dtype=np.int)
 
    # 빈 텐서(모든 값이 0) 생성
    tensor = torch.zeros(*dims, dtype=torch.float32)
 
    # 복셀의 중심 포인트 얻기
-   centers = np.asarray(voxel_grid.get_voxels(), dtype=np.float32)[:, :3]  # (num_voxels, 3)
+   if map_center is None:
+      centers = np.asarray(voxel_grid.get_voxels(), dtype=np.float32)[:, :3]  # (num_voxels, 3)
    indices = np.round((centers - min_bound) / voxel_size).astype(np.int)
 
    # 텐서에 복셀 값 설정
    tensor[indices[:, 0], indices[:, 1], indices[:, 2]] = 1.0
-   return tensor
+   return tensor, [dims, centers]
 
-def getMapPointCloud(client, voxel_size):
-   curr_dir = "\\".join(os.path.dirname(os.path.abspath(__file__)).split("\\")[:-1])
-   binvox_path = os.path.join(curr_dir, "maps", f"map-{voxel_size}.binvox")
-   if not os.path.exists(binvox_path):
-      print("Create map voxel...")
-      center = airsim.Vector3r(0, 0, 0)
-      client.simCreateVoxelGrid(center, 1000, 1000, 100, voxel_size, binvox_path)
-
-   # 복셀 데이터 읽기
-   with open(binvox_path, 'rb') as f:
-      voxel_data = binvox_rw.read_as_3d_array(f)
-
-   filled_voxels = np.where(voxel_data.data)
-   coords = np.array(list(zip(*filled_voxels)))
-   
-   pcd = o3d.geometry.PointCloud()
-   pcd.points = o3d.utility.Vector3dVector(coords * voxel_data.scale + voxel_data.translate)
-
-   return pcd
+def getMapVoxel(map_path):
+   pcd = o3d.io.read_point_cloud(map_path)
+   pcd, map_center = pcd_to_voxel_tensor(pcd)
+   return pcd, map_center
 
 def get_transformed_lidar_pc(client):
    # raw lidar data to open3d PointCloud
