@@ -3,8 +3,8 @@ import airsim
 
 from math import pi
 import numpy as np
+import torch.nn.functional as F
 import random
-import torch
 
 from tools.vision import *
 from tools.train_utils import *
@@ -41,7 +41,7 @@ def calcStatus(reward):
             status = "work bad"
     return status
 
-def calcReward(map_pcd, prev_pcd, curr_pcd, client, running_time, args):
+def calcReward(map_voxel, map_info, prev_pcd, curr_pcd, client, running_time, args):
 
     # 상태에서 필요한 정보 추출
     collision_info = client.simGetCollisionInfo()
@@ -50,15 +50,12 @@ def calcReward(map_pcd, prev_pcd, curr_pcd, client, running_time, args):
     reward = 0.0
 
     # 이전 포인트 클라우드와 현재 포인트 클라우드의 차이 계산
-    map_np = np.asarray(map_pcd.points)
-    prev_np = np.asarray(prev_pcd.points)
-    curr_np = np.asarray(curr_pcd.points)
+    prev_voxel = pcd_to_voxel_tensor(prev_pcd, dims=map_info[0], map_center=map_info[1])
+    curr_voxel = pcd_to_voxel_tensor(prev_pcd + curr_pcd, dims=map_info[0], map_center=map_info[1])
     
     # 두 포인트 클라우드의 크기를 동일하게 맞춤
-    min_points_mc = min(map_np.shape[0], curr_np.shape[0])
-    mse_mc = np.mean((map_np[:min_points_mc] - curr_np[:min_points_mc]) ** 2)
-    min_points_pc = min(prev_np.shape[0], curr_np.shape[0])
-    mse_pc = np.mean((prev_np[:min_points_pc] - curr_np[:min_points_pc]) ** 2)
+    mse_mc = F.mse_loss(map_voxel, curr_voxel, reduction='mean').item()
+    mse_pc = F.mse_loss(prev_voxel, curr_voxel, reduction='mean').item()
     print("mse_mc:", mse_mc)
     print("mse_pc:", mse_pc)
     
@@ -83,11 +80,10 @@ def calcReward(map_pcd, prev_pcd, curr_pcd, client, running_time, args):
         reward -= 1.0
         print("전체 맵과 현재 만든 맵의 차이가 크면 작은 음의 보상")
     elif mse_mc < args.voxel_threshold:
-        reward += 10.0
+        reward = 10.0
         print("전체 맵과 현재 만든 맵의 차이가 작으면 큰 양의 보상")
 
     print("최종 reward:", reward)
-
     return reward
 
 def setRandomPose(client, args):
@@ -114,3 +110,20 @@ def putDataIntoQueue(data_queue, pcd):
         "colors" : list(pcd.colors)
     }
     data_queue.put(data)
+
+def connectToClient():
+    client = airsim.MultirotorClient() # airsim 클라이언트 객체 생성
+    client.confirmConnection() # 클라이언트와 시뮬레이션서버간의 연결 확인, 연결이 안되어있으면 에러 발생
+    client.enableApiControl(True) # 드론의 API 제어를 활성화, 활성화 해야 드론에 명령을 내릴 수 있음, 비활성화시 드론은 움직이지 않음.
+    return client
+
+def droneReadyState(client):
+    client.armDisarm(True) # 드론의 시동을 걸어줌, 가상 드론의 모터를 활성화하고 비행 준비 상태로 전환
+    client.takeoffAsync().join() # 이륙, join()은 이륙 작업이 완료될때까지 기다리는 역할을 함
+    client.hoverAsync().join() # 드론이 현재위치에서 정지비행상태로 전환하는 메서드, join은 완료할 때까지 기다리는 역할
+    return client
+
+def resetState(client):
+    client.reset()
+    client = droneReadyState(client)
+    return client
