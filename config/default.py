@@ -17,6 +17,8 @@ args = edict(drone=drone)
 
 args.device = torch.device(f"cuda" if torch.cuda.is_available() else "cpu")
 
+args.map_path = "./maps/map_created_by_lidar_filtered.ply"
+
 args.num_classes = 4
 
 args.gamma = 0.9
