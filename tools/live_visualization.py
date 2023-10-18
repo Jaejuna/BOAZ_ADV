@@ -20,6 +20,7 @@ class PointCloudVisualizer(QMainWindow):
 
         # Flag for the initial point cloud
         self.initial_cloud = True
+        self.global_pcd = o3d.geometry.PointCloud()
 
         # Timer to update point cloud
         self.timer = QTimer(self)
@@ -27,19 +28,28 @@ class PointCloudVisualizer(QMainWindow):
         self.timer.start(1000)  # Update every second
 
     def update_point_cloud(self):
-        # Fetch new point cloud data (this is dummy data for the example)
+        # Fetch new point cloud data or reset command
         if not self.data_queue.empty():
             data = self.data_queue.get()
 
+            # Check for reset command
+            if data == "reset":
+                self.global_pcd = o3d.geometry.PointCloud()
+                if not self.initial_cloud:
+                    self.vis.clear_geometries()  # Remove all geometries
+                    self.initial_cloud = True
+                return
+
             point_cloud = o3d.geometry.PointCloud()
             point_cloud.points = o3d.utility.Vector3dVector(np.asarray(data["points"]))
-            point_cloud.colors = o3d.utility.Vector3dVector(np.asarray(data["colors"]))
+            self.global_pcd = self.global_pcd + point_cloud
+            # point_cloud.colors = o3d.utility.Vector3dVector(np.asarray(data["colors"]))
 
             if self.initial_cloud:
-                self.vis.add_geometry(point_cloud)
+                self.vis.add_geometry(self.global_pcd)
                 self.initial_cloud = False
             else:
-                self.vis.update_geometry(point_cloud)
+                self.vis.update_geometry(self.global_pcd)
 
             # Update the visualization
             self.vis.poll_events()
@@ -51,28 +61,4 @@ class PointCloudVisualizer(QMainWindow):
 def live_visualization(data_queue):
     app = QApplication(sys.argv)
     mainWin = PointCloudVisualizer(data_queue)
-    mainWin.show()
     sys.exit(app.exec_())
-
-def live_visualization_(queue):
-    vis = o3d.visualization.Visualizer()
-    vis.create_window("Point Cloud Viewer", 800, 600)
-
-    pcd = o3d.geometry.PointCloud()
-    vis.add_geometry(pcd)
-
-    while True:
-        if not queue.empty():
-            data = queue.get()
-
-            if data is None:
-                break
-
-            pcd.points = o3d.utility.Vector3dVector(np.asarray(data["points"]))
-            pcd.colors = o3d.utility.Vector3dVector(np.asarray(data["colors"]))
-
-            vis.update_geometry(pcd)
-            vis.poll_events()
-            vis.update_renderer()
-
-    vis.destroy_window()
