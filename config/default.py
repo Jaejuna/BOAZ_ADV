@@ -4,7 +4,7 @@ import torch
 drone = edict()
 drone.yaw_rate = 90
 drone.default_velocity = 5
-drone.moving_unit = 0.5
+drone.moving_unit = 5
 drone.set_random_pose = False
 drone.x_range = 100
 drone.y_range = 100
@@ -17,7 +17,7 @@ args = edict(drone=drone)
 
 args.device = torch.device(f"cuda" if torch.cuda.is_available() else "cpu")
 
-args.map_path = "./maps/map_created_by_lidar_filtered.ply"
+args.map_path = "./maps/map_created_by_lidar_small_filtered.ply"
 
 args.num_classes = 4
 

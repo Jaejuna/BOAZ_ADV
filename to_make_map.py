@@ -40,8 +40,8 @@ client.enableApiControl(True)
 client.armDisarm(True)
 client.takeoffAsync().join()
 
-global_pcd = o3d.geometry.PointCloud() # 새롭게 맵을 만들때 사용
-# global_pcd = o3d.io.read_point_cloud("./results/map_created_by_lidar.ply") # 기존에 만들던 맵을 계속해서 사용할 때 사용
+# global_pcd = o3d.geometry.PointCloud() # 새롭게 맵을 만들때 사용
+global_pcd = o3d.io.read_point_cloud("./results/map_created_by_lidar.ply") # 기존에 만들던 맵을 계속해서 사용할 때 사용
 
 while 1:
    input_data = input("input data : ")
@@ -49,16 +49,15 @@ while 1:
    elif input_data == "reset": 
       client.reset()
    try:
-      input_data = list(map(int, input_data.split(" ")))
+      input_data = list(map(float, input_data.split(" ")))
    except:
       print("something wrong...")
       continue
 
    if len(input_data) == 3:
-      print(f"move to {input_data}")
-      client.moveToPositionAsync(*input_data, 5).join()
+      # client.moveToPositionAsync(*input_data, 5).join()
+      client.moveByVelocityAsync(*input_data, 1).join()
    elif len(input_data) == 1:
-      print(f"rotate to {input_data}")
       client.rotateToYawAsync(*input_data).join()
    else:
       print("check your input")
@@ -68,5 +67,7 @@ while 1:
    pcd, state = get_transformed_lidar_pc(client)
    global_pcd = global_pcd + pcd
    global_pcd = global_pcd.voxel_down_sample(voxel_size=0.05)
+   pose = client.simGetVehiclePose()
+   print(pose.position.x_val, pose.position.y_val, pose.position.z_val)
    client.simPause(False)
    o3d.io.write_point_cloud("./results/map_created_by_lidar.ply", global_pcd)
