@@ -5,6 +5,7 @@ from math import pi
 import numpy as np
 import torch.nn.functional as F
 import random
+import time
 
 from tools.vision import *
 from tools.train_utils import *
@@ -13,7 +14,7 @@ def clacDuration(yaw_rate, radian):
     duration = (pi / radian) / (yaw_rate * pi / 180)
     return duration
 
-def calcValues(qval, args):
+def calcValues(qval, client, args):
     action_vector = qval[0, :3]
     one_hot = np.zeros_like(action_vector)
     action = np.argmax(action_vector)
@@ -26,6 +27,11 @@ def calcValues(qval, args):
     one_hot[action] = 1
     action_vector = one_hot * args["drone"].moving_unit
     action_vector = list(map(float, action_vector))
+
+    pose = client.simGetVehiclePose()
+    action_vector[0] += pose.position.x_val
+    action_vector[1] += pose.position.y_val
+    action_vector[2] -= pose.position.z_val
 
     if radian < -1:  radian %= -1
     elif radian > 1: radian %= 1
@@ -50,8 +56,8 @@ def calcReward(map_voxel, map_info, prev_pcd, curr_pcd, client, running_time, ar
     reward = 0.0
 
     # 이전 포인트 클라우드와 현재 포인트 클라우드의 차이 계산
-    prev_voxel, _ = pcd_to_voxel_tensor(prev_pcd, dims=map_info[0], map_center=map_info[1])
-    curr_voxel, _ = pcd_to_voxel_tensor(prev_pcd + curr_pcd, dims=map_info[0], map_center=map_info[1])
+    prev_voxel, _ = pcd_to_voxel_tensor(prev_pcd, infos=map_info)
+    curr_voxel, _ = pcd_to_voxel_tensor(prev_pcd + curr_pcd, infos=map_info)
     
     # 두 포인트 클라우드의 크기를 동일하게 맞춤
     mse_mc = F.mse_loss(map_voxel, curr_voxel, reduction='mean').item()
@@ -123,7 +129,14 @@ def droneReadyState(client):
     client.hoverAsync().join() # 드론이 현재위치에서 정지비행상태로 전환하는 메서드, join은 완료할 때까지 기다리는 역할
     return client
 
-def resetState(client):
+def resetState(client, data_queue):
+    print("\nreset client...")
     client.reset()
-    # client = droneReadyState(client)
+    data_queue.put("reset")
+    time.sleep(2)
+    client.confirmConnection() # 클라이언트와 시뮬레이션서버간의 연결 확인, 연결이 안되어있으면 에러 발생
+    client.enableApiControl(True) # 드론의 API 제어를 활성화, 활성화 해야 드론에 명령을 내릴 수 있음, 비활성화시 드론은 움직이지 않음.
+    client.armDisarm(True) # 드론의 시동을 걸어줌, 가상 드론의 모터를 활성화하고 비행 준비 상태로 전환
+    client.takeoffAsync().join() # 이륙, join()은 이륙 작업이 완료될때까지 기다리는 역할을 함
+    client.hoverAsync().join() # 드론이 현재위치에서 정지비행상태로 전환하는 메서드, join은 완료할 때까지 기다리는 역할
     return client
