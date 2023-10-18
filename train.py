@@ -41,20 +41,18 @@ if __name__ == '__main__':
     criterion = torch.nn.MSELoss() # 손실함수 mse 사용
     optimizer = torch.optim.Adam(model1.parameters(), lr=args.learning_rate) # 최적화 알고리즘 아담사용
 
-    client = connectToClient() # client 생성
-    client = droneReadyState(client) # 드론을 준비 완료 상태로 만듦
+    client = airsim.MultirotorClient() # client 생성
 
     best_acc = 0  # 가장 높은 정확도
     episode_step=0 # 에피소드의 현재 단계
-    map_voxel, map_info = getMapVoxel(args.map_path) # 맵의 포인트 클라우드를 얻음
+    map_voxel, map_infos = getMapVoxel(args.map_path) # 맵의 포인트 클라우드를 얻음
 
     replay = deque(maxlen=args.mem_size) 
     losses = []
 
     for epoch in range(args.epochs):
-        client = resetState(client) # 매 epoch 마다 client를 리셋
-        if args["drone"].set_random_pose:
-            setRandomPose(client, args) # 드론의 위치를 랜덤으로 설정
+        client = resetState(client, data_queue) # 매 epoch 마다 client를 리셋
+        if args["drone"].set_random_pose: setRandomPose(client, args) # 드론의 위치를 랜덤으로 설정
 
         global_pcd = o3d.geometry.PointCloud() # 빈 3D 포인트 클라우드 생성, 이후에 드론의 위치를 기준으로 포인트 클라우드를 추가하여 채움
 
@@ -65,9 +63,9 @@ if __name__ == '__main__':
                                                                                                 # permute(0, 3, 1, 2) 이미지 데이터의 순서를 배치, 높이, 너비, 채널 순서로 변경
         curr_pcd = get_transformed_lidar_pc(client) # 현재 포인트 클라우드를 전체 클라우드에 병합, 현재시점의 데이터를 전체 데이터에 누적
         client.simPause(False)
+
         global_pcd = global_pcd + curr_pcd # 현재 포인트 클라우드를 전체 클라우드에 복사
-        if args.live_visualization:
-            putDataIntoQueue(data_queue, global_pcd) # 3D 포인트 클라우드 데이터를 큐에 넣음
+        if args.live_visualization: putDataIntoQueue(data_queue, curr_pcd) # 3D 포인트 클라우드 데이터를 큐에 넣음
 
         status = "running"  # 상태를 running으로 설정
         running_time = 0    # 드론이 움직인 시간
@@ -76,24 +74,26 @@ if __name__ == '__main__':
             qval = model1(rgb1)     # 모델 1에 RGB 이미지를 입력하여 Q값을 얻음
             qval = qval.cpu().data.numpy()  # Q값을 numpy 배열로 변환
 
-            x, y, z, radian, action = calcValues(qval, args) # Q값을 통해 드론의 위치와 행동을 계산
+            x, y, z, radian, action = calcValues(qval, client, args) # Q값을 통해 드론의 위치와 행동을 계산
 
             move_start_time = time.time()   # 현재 시간을 측정, 드론이 움직이기 시작한 시간
-            client.moveToPositionAsync(x, y, z, args["drone"].default_velocity).join() # 드론을 x, y, z 위치로 이동시킴, velocity는 드론의 속도
+            client.moveToPositionAsync(x, y, z, args["drone"].default_velocity) 
+                                    #    , yaw_mode=airsim.YawMode(is_rate=False, yaw_or_rate=clacDuration(args["drone"].yaw_rate, radian))) # 드론을 x, y, z 위치로 이동시킴, velocity는 드론의 속도
+            # client.moveByVelocityAsync(x, y, z, 1)
             client.rotateToYawAsync(clacDuration(args["drone"].yaw_rate, radian)).join() 
 
             client.simPause(True)
             running_time += time.time() - move_start_time   # 드론이 움직인 시간을 측정
             rgb2 = getRGBImage(client)  # 드론의 카메라를 통해 RGB 이미지를 얻음
             rgb2 = torch.from_numpy(rgb2).unsqueeze(dim=0).permute(0, 3, 1, 2).float().to(device)  # RGB 이미지를 텐서로 변환
-                                                                                                    # unsqueeze(dim=0)은 차원을 추가. 여기서는 배치차원을 추가하여 입력을 한번에 전달하기 위함
-                                                                                                    # permute(0, 3, 1, 2) 이미지 데이터의 순서를 배치, 높이, 너비, 채널 순서로 변경
+                                                                                                   # unsqueeze(dim=0)은 차원을 추가. 여기서는 배치차원을 추가하여 입력을 한번에 전달하기 위함
+                                                                                                   # permute(0, 3, 1, 2) 이미지 데이터의 순서를 배치, 높이, 너비, 채널 순서로 변경
             curr_pcd = get_transformed_lidar_pc(client)   # 현재 포인트 클라우드를 전체 클라우드에 병합, 현재시점의 데이터를 전체 데이터에 누적
-            reward = calcReward(map_voxel, map_info, global_pcd, curr_pcd, client, running_time, args)   # 보상을 계산, 맵의 포인트 클라우드, 전체 포인트 클라우드, 현재 포인트 클라우드, 드론이 움직인 시간, args를 인자로 전달
+            reward = calcReward(map_voxel, map_infos, global_pcd, curr_pcd, client, running_time, args)   # 보상을 계산, 맵의 포인트 클라우드, 전체 포인트 클라우드, 현재 포인트 클라우드, 드론이 움직인 시간, args를 인자로 전달
             client.simPause(False)
+
             global_pcd = global_pcd + curr_pcd    # 현재 포인트 클라우드를 전체 클라우드에 복사
-            if args.live_visualization:
-                putDataIntoQueue(data_queue, global_pcd)    # 3D 포인트 클라우드 데이터를 큐에 넣음
+            if args.live_visualization: putDataIntoQueue(data_queue, curr_pcd)    # 3D 포인트 클라우드 데이터를 큐에 넣음
 
             done = True if reward > 0 else False    # 양수의 보상이 나오면 해당 에피소드는 목표를 달성하여 종료
             exp =  (rgb1, rgb2, action, reward, done) # 경험을 튜플로 생성, 경험은 RGB 이미지, 행동, 보상, 종료 여부로 구성
@@ -139,14 +139,13 @@ if __name__ == '__main__':
 
         if epoch % args.eval_freq == 0 and epoch != 0: # 일정 주기마다 모델을 평가
             o3d.io.write_point_cloud(os.path.join(job_dir, f'global_pcd_epoch{epoch}.ply'), global_pcd)
-            acc = getAccuracy(model1, client, map_voxel, map_info, args)    # 모델의 정확도를 계산
+            acc = getAccuracy(model1, client, map_voxel, map_infos, args)    # 모델의 정확도를 계산
             if best_acc < acc: # 정확도가 높아지면
                 best_acc = acc # 정확도를 갱신
                 print("Save new best model...") # 새로운 최고 정확도를 출력
                 torch.save(model1.state_dict(), os.path.join(job_dir, 'best_accurracy.pth')) # 모델1의 가중치와 편향을 저장
 
     if args.live_visualization: # 라이브 시각화 프로세스가 동작중이면
-        data_queue.put(None)    # 큐에 None을 넣어서 종료
         live_vis_process.join() # 프로세스가 종료될 때까지 기다림
     client.enableApiControl(False)  # 드론의 API 제어를 비활성화
     losses = np.array(losses) # 리스트를 numpy 배열로 변환
