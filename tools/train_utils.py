@@ -9,10 +9,24 @@ import time
 
 from tools.vision import *
 from tools.train_utils import *
+from tools.models import RGBDepthFusionNet
 
 import threading
 
 import logging
+
+class TimeDecayRewardScheduler():
+    def __init__(self, decay_factor, min_decay_factor, every_second):
+        self.decay_factor = decay_factor
+        self.min_decay_factor = min_decay_factor
+        self.es = every_second
+    
+    def get_decay_factor(self, running_time):
+        t = running_time // self.es
+        result = self.decay_factor ** t
+        if result < self.min_decay_factor:
+            return self.min_decay_factor
+        return result
 
 class StoppableThread(threading.Thread):
     def __init__(self, target, args=(), kwargs=None):
@@ -32,6 +46,15 @@ class StoppableThread(threading.Thread):
     def stop(self):
         self._stop_event.set()
 
+def create_models(args):
+    model1 = RGBDepthFusionNet(num_classes=args.num_classes, backbone=args.backbone_name) # 모델 생성
+    if args.checkpoint is not None: model1.load_state_dict(torch.load(args.checkpoint))
+    model2 = copy.deepcopy(model1) # 모델 생성 22
+    model2.load_state_dict(model1.state_dict())  # 모델 2에 모델 1의 가중치와 매개변수를 복사
+    model1.to(args.device) # 모델 1을 cpu or gpu에 할당
+    model2.to(args.device) # 모델 2를 cpu or gpu에 할당
+    return model1, model2
+
 def make_logger(job_dir):
     # 로그 생성
     logger = logging.getLogger()
@@ -48,7 +71,7 @@ def make_logger(job_dir):
 def move_with_timeout(client, x, y, z, duration):
     # 이동 명령 실행
     def move():
-        client.moveByVelocityAsync(x, y, -z, 1).join()
+        client.moveByVelocityAsync(x, y, z, 2).join()
     
     move_thread = StoppableThread(target=move)
     move_thread.start()
@@ -60,10 +83,10 @@ def move_with_timeout(client, x, y, z, duration):
         # 스레드가 여전히 실행 중이면, 필요한 경우 여기에 스레드 중단 로직을 추가
         move_thread.join()
 
-def rotate_with_timeout(client, yaw_rate, radian, duration):
+def rotate_with_timeout(client, degree, duration):
     # 회전 명령 실행
     def rotate():
-        client.rotateToYawAsync(clacDuration(yaw_rate, radian)).join()
+        client.rotateToYawAsync(degree).join()
     
     rotate_thread = StoppableThread(target=rotate)
     rotate_thread.start()
@@ -82,36 +105,51 @@ def convert_negative_radians_to_positive(radian):
     n = math.ceil(abs(radian) / (2 * math.pi))
     return radian + 2 * math.pi * n
 
-def clacDuration(yaw_rate, radian):
+def calcDuration(yaw_rate, radian):
     # radian = convert_negative_radians_to_positive(radian)
     duration = (pi / radian) / (yaw_rate * pi / 180)
     return duration
 
-def calcValues(qval, args):
-    # action_vector를 PyTorch 텐서로 변환
-    action_vector = torch.from_numpy(qval[0, :3])
+def getClosestDegree(client):
+    state = client.getMultirotorState()
+    orientation = state.kinematics_estimated.orientation
+    degree = math.degrees(airsim.to_eularian_angles(orientation)[2])
 
-    # Softmax 적용
-    softmax = F.softmax(action_vector, dim=0).detach().cpu().numpy()
+    if degree < 0:
+        degree = 360 + degree
+
+    angles = [0, 90, 180, 270, 360]
+    closest = min(angles, key=lambda x: abs(x - degree))
+    return closest
+
+def calcForwardDirection(client):
+    degree = getClosestDegree(client)
+    forward_vector = airsim.Vector3r(math.cos(math.radians(degree)), math.sin(math.radians(degree)), 0)
+    return [forward_vector.x_val, forward_vector.y_val, forward_vector.z_val]
+
+def calcDegree(client, action):
+    degree = getClosestDegree(client)
+    if   action == 1: degree -= 90
+    elif action == 2: degree += 90
+    return degree
+
+def calcValues(qval, client, args):
+    softmax = F.softmax(torch.from_numpy(qval[0, :3]), dim=0).detach().cpu().numpy()
     action = np.random.choice(np.array([0, 1, 2]), p=softmax)
-    radian = qval[0, 3]
-    
-    one_hot = np.zeros_like(action_vector.numpy())
-    one_hot[action] = 1
-    action_vector = one_hot * args["drone"].moving_unit
-    action_vector = list(map(float, action_vector))
+    if args.train_mode == "manual": 
+        while 1:
+            action = int(input("select action (0, 1, 2) : "))
+            if action == 0 or action == 1 or action == 2: break
+            else: print("wrong input...")
+    if action == 0: return action, calcForwardDirection(client)
+    else:           return action, calcDegree(client, action)
 
-    radian = np.mod(radian + np.pi, 2 * np.pi) - np.pi
-    
-    return *action_vector, radian, action
-
-def calcStatus(reward):
+def calcStatus(reward, done):
     status = "running"
-    if abs(reward) != 2:
-        if reward > 0:
-            status = "work well"
-        else:
-            status = "work bad"
+    if reward > 0 and done:
+        status = "work well"
+    elif reward < 0:
+        status = "work bad"
     return status
 
 def calc_prev_curr_reward(prev_pcd, curr_pcd):
@@ -121,13 +159,13 @@ def calc_prev_curr_reward(prev_pcd, curr_pcd):
     len_prev = len(prev_pcd.points)
     len_curr = len(curr_pcd.points)
     
-    if (len_curr - len_prev) / len_ori_curr < 0.05: 
+    if (len_curr - len_prev) / len_ori_curr < 0.1: 
         print("전에 만든 맵과 현재 만든 맵의 차이가 작으면 큰 음의 보상 (-10)")
         return -10
     else:
         print("전에 만든 맵과 현재 만든 맵의 차이가 크면 작은 음의 보상 (-1)")
         return -1
-    
+
 def calc_diff(mean1, mean2, std1, std2):
     mean_diff = np.abs(mean2 - mean1)
     std_diff = np.abs(std2 - std1)
@@ -142,39 +180,42 @@ def calc_map_curr_reward(curr_pcd, map_infos, args):
     dist_state = calc_diff(map_dist_mean, curr_dist_mean, map_dist_std, curr_dist_std) < args.reward_state_threshold
     density_state = calc_diff(map_density_mean, curr_density_mean, map_density_std, curr_density_std) < args.reward_state_threshold
     if count_state:
-        print("map pcd와 current pcd의 차이가 크면 작은 음의 보상 (-1)")
-        return -1
+        print("map pcd와 current pcd의 포인트 수의 차이가 크면 작은 음의 보상 (-1)")
+        return -3
     elif dist_state: 
         print("map pcd와 current pcd의 분포 차이가 크면 작은 음의 보상 (-1)")
-        return -1
+        return -2
     elif density_state:
         print("map pcd와 current pcd의 밀도 차이가 크면 작은 음의 보상 (-1)")
         return -1
     else:
         print("목표하던 바를 달성했으므로 큰 양의 보상 (+10)")
         return 10
-    
-def calcReward(map_infos, prev_pcd, curr_pcd, running_time, args):
-    # 보상 초기값
-    reward = 0.0
 
-    # 드론이 충돌한 경우
-    # if has_collided:
-    #     reward -= 20.0  # 충돌 시 큰 음수 값으로 보상
-    #     print("드론이 충돌한 경우")
+def calcDone(map_pcd, curr_pcd):
+    done = len(curr_pcd.points) >= len(map_pcd.points) * 0.7
+    return done
+
+def calcReward(prev_pcd, curr_pcd, running_time, args):
     if running_time >= args.max_time:
-        reward -= 10.0
-        print("시간이 초과되어 큰 음의 보상 (-10)")
+        reward = -10.0
+        return reward
+    
+    len_ori_curr = len(curr_pcd.points)
+    curr_pcd = prev_pcd + curr_pcd
+    curr_pcd = curr_pcd.voxel_down_sample(voxel_size=0.05)
+    len_prev = len(prev_pcd.points)
+    len_curr = len(curr_pcd.points)
+    reward = (len_curr - len_prev) / len_ori_curr
 
-    # 전에 만든 맵과 현재 만든 맵의 차이에 따른 보상
-    reward += calc_prev_curr_reward(prev_pcd, curr_pcd)
+    # # 전에 만든 맵과 현재 만든 맵의 차이에 따른 보상
+    # reward += calc_prev_curr_reward(prev_pcd, curr_pcd)
 
-    # 전체 맵과 현재 만든 맵의 차이에 따른 보상
-    mc_reward = calc_map_curr_reward(prev_pcd + curr_pcd, map_infos, args)
-    if mc_reward == -1:   reward += mc_reward
-    elif mc_reward == 10: reward = mc_reward
+    # # 전체 맵과 현재 만든 맵의 차이에 따른 보상
+    # mc_reward = calc_map_curr_reward(prev_pcd + curr_pcd, map_infos, args)
+    # if mc_reward != 10:   reward += mc_reward
+    # else:                 reward = mc_reward
 
-    print(f"total reward : {reward}")
     return reward
 
 def setRandomPose(client, args):
