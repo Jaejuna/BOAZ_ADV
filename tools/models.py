@@ -18,7 +18,7 @@ class MovePredictModel(nn.Module):
             self.backbone = models.resnet152(pretrained=pretrained)
         else:
             raise Exception("Only ResNet series available.")
-
+        
         self.fc_layer = nn.Sequential(
             nn.Linear(1000, 512), 
             nn.ReLU(),
@@ -56,6 +56,14 @@ class RGBDepthFusionNet(nn.Module):
         # 마지막 분류 레이어 제거 (특징만 추출하기 위함)
         self.rgb_resnet = nn.Sequential(*(list(self.rgb_resnet.children())[:-2]))
         self.depth_resnet = nn.Sequential(*(list(self.depth_resnet.children())[:-2]))
+        
+        # 위치 및 방향 정보 처리를 위한 완전 연결 계층
+        self.position_fc = nn.Sequential(
+            nn.Linear(3, 64),  # 위치 및 방향 정보를 위한 입력 레이어 (x, y, yaw)
+            nn.ReLU(),
+            nn.Linear(64, 128),
+            nn.ReLU()
+        )
 
         # 융합을 위한 간단한 컨볼루션 레이어 수정
         self.fusion_conv = nn.Sequential(
@@ -68,25 +76,33 @@ class RGBDepthFusionNet(nn.Module):
 
         # 완전 연결 계층 추가
         self.fc_layer = nn.Sequential(
-            nn.Linear(512, 256),
+            nn.Linear(640, 256),
             nn.ReLU(),
             nn.Linear(256, 128),
             nn.ReLU(),
             nn.Linear(128, num_classes),
         )
 
-    def forward(self, rgb_image, depth_image):
+    def forward(self, rgb_image, depth_image, position):
         # 각 이미지에 대한 특징 추출
         rgb_feature = self.rgb_resnet(rgb_image)
         depth_feature = self.depth_resnet(depth_image)
 
         # 특징들을 채널 차원을 따라 결합
-        combined_feature = torch.cat((rgb_feature, depth_feature), dim=1)
+        cat_feature = torch.cat((rgb_feature, depth_feature), dim=1)
 
         # 융합된 특징을 컨볼루션 레이어에 통과시켜 최종 특징 추출
-        fused_feature = self.fusion_conv(combined_feature)
+        fused_feature = self.fusion_conv(cat_feature)
 
         # 완전 연결 계층을 통과시켜 최종 출력 생성
         fused_feature = fused_feature.view(fused_feature.size(0), -1)  # 배치 차원을 유지하며 나머지 차원을 flatten
-        output = self.fc_layer(fused_feature)
+        
+        # 위치 및 방향 정보 처리
+        position_feature = self.position_fc(position)
+
+        # 위치 정보와 이미지 특징 결합
+        combined_feature = torch.cat((fused_feature, position_feature), dim=1)
+
+        # 최종 출력 생성
+        output = self.fc_layer(combined_feature)
         return output
