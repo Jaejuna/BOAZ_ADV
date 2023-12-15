@@ -3,6 +3,7 @@ import airsim
 
 from math import pi
 import numpy as np
+import torch
 import torch.nn.functional as F
 import random
 import time
@@ -71,7 +72,7 @@ def make_logger(job_dir):
 def move_with_timeout(client, x, y, z, duration):
     # 이동 명령 실행
     def move():
-        client.moveByVelocityAsync(x, y, z, 2).join()
+        client.moveByVelocityAsync(x, y, z, 1).join()
     
     move_thread = StoppableThread(target=move)
     move_thread.start()
@@ -138,7 +139,11 @@ def calcValues(qval, client, args):
     action = np.random.choice(np.array([0, 1, 2]), p=softmax)
     if args.train_mode == "manual": 
         while 1:
-            action = int(input("select action (0, 1, 2) : "))
+            try:
+                action = int(input("select action (0, 1, 2) : "))
+            except:
+                print("wrong input...")
+                continue
             if action == 0 or action == 1 or action == 2: break
             else: print("wrong input...")
     if action == 0: return action, calcForwardDirection(client)
@@ -152,46 +157,6 @@ def calcStatus(reward, done):
         status = "work bad"
     return status
 
-def calc_prev_curr_reward(prev_pcd, curr_pcd):
-    len_ori_curr = len(curr_pcd.points)
-    curr_pcd = prev_pcd + curr_pcd
-    curr_pcd = curr_pcd.voxel_down_sample(voxel_size=0.05)
-    len_prev = len(prev_pcd.points)
-    len_curr = len(curr_pcd.points)
-    
-    if (len_curr - len_prev) / len_ori_curr < 0.1: 
-        print("전에 만든 맵과 현재 만든 맵의 차이가 작으면 큰 음의 보상 (-10)")
-        return -10
-    else:
-        print("전에 만든 맵과 현재 만든 맵의 차이가 크면 작은 음의 보상 (-1)")
-        return -1
-
-def calc_diff(mean1, mean2, std1, std2):
-    mean_diff = np.abs(mean2 - mean1)
-    std_diff = np.abs(std2 - std1)
-    total_diff = np.sum(mean_diff**2 + std_diff**2)
-    return total_diff
-
-def calc_map_curr_reward(curr_pcd, map_infos, args):
-    map_len, map_dist_mean, map_dist_std, map_density_mean, map_density_std = map_infos
-    curr_len, curr_dist_mean, curr_dist_std, curr_density_mean, curr_density_std = extract_infos_from_pcd(curr_pcd)
-    
-    count_state = curr_len < map_len * 0.75
-    dist_state = calc_diff(map_dist_mean, curr_dist_mean, map_dist_std, curr_dist_std) < args.reward_state_threshold
-    density_state = calc_diff(map_density_mean, curr_density_mean, map_density_std, curr_density_std) < args.reward_state_threshold
-    if count_state:
-        print("map pcd와 current pcd의 포인트 수의 차이가 크면 작은 음의 보상 (-1)")
-        return -3
-    elif dist_state: 
-        print("map pcd와 current pcd의 분포 차이가 크면 작은 음의 보상 (-1)")
-        return -2
-    elif density_state:
-        print("map pcd와 current pcd의 밀도 차이가 크면 작은 음의 보상 (-1)")
-        return -1
-    else:
-        print("목표하던 바를 달성했으므로 큰 양의 보상 (+10)")
-        return 10
-
 def calcDone(map_pcd, curr_pcd):
     done = len(curr_pcd.points) >= len(map_pcd.points) * 0.7
     return done
@@ -202,21 +167,69 @@ def calcReward(prev_pcd, curr_pcd, running_time, args):
         return reward
     
     len_ori_curr = len(curr_pcd.points)
+    len_prev = len(prev_pcd.points)
     curr_pcd = prev_pcd + curr_pcd
     curr_pcd = curr_pcd.voxel_down_sample(voxel_size=0.05)
-    len_prev = len(prev_pcd.points)
     len_curr = len(curr_pcd.points)
-    reward = (len_curr - len_prev) / len_ori_curr
-
-    # # 전에 만든 맵과 현재 만든 맵의 차이에 따른 보상
-    # reward += calc_prev_curr_reward(prev_pcd, curr_pcd)
-
-    # # 전체 맵과 현재 만든 맵의 차이에 따른 보상
-    # mc_reward = calc_map_curr_reward(prev_pcd + curr_pcd, map_infos, args)
-    # if mc_reward != 10:   reward += mc_reward
-    # else:                 reward = mc_reward
+    reward = abs(len_curr - len_prev) / len_ori_curr
 
     return reward
+
+def getMinMaxXY():
+   min_x, max_x = -3.3802177906036377, 16.81801986694336
+   min_y, max_y = -1.6409467458724976, 19.18399429321289
+   return min_x, max_x, min_y, max_y
+
+def normalize_position(x, y, min_x, max_x, min_y, max_y):
+    normalized_x = (x - min_x) / (max_x - min_x)
+    normalized_y = (y - min_y) / (max_y - min_y)
+    return normalized_x, normalized_y
+
+def normalize_yaw(yaw):
+    # Yaw 값을 0도에서 360도 범위로 조정 (필요한 경우)
+    if yaw < 0:
+        yaw += 360
+
+    # Yaw 값을 0과 1 사이로 정규화
+    normalized_yaw = yaw / 360
+    return normalized_yaw
+
+def getDronePositionTensor(client, min_x, max_x, min_y, max_y, device):
+    # 드론 상태 가져오기
+    drone_state = client.getMultirotorState()
+
+    # GPS 좌표에서 x, y 위치 추출
+    local_position = drone_state.kinematics_estimated.position
+    x = local_position.x_val
+    y = local_position.y_val
+
+    # 위치 정규화
+    x, y = normalize_position(x, y, min_x, max_x, min_y, max_y)
+
+    # 쿼터니언에서 Yaw(방향) 각도 추출
+    orientation = drone_state.kinematics_estimated.orientation
+    yaw = normalize_yaw(math.degrees(airsim.to_eularian_angles(orientation)[2]))
+
+    position_tensor = torch.FloatTensor([x, y, yaw]).to(device)
+    return position_tensor.unsqueeze(dim=0)
+
+def saveEXP(exp, job_dir, name_tag):
+    rgb1, rgb2, depth1, depth2, position, action, reward, done = exp
+
+    save_path = os.path.join(job_dir, "exp")
+    os.makedirs(save_path, exist_ok=True)
+
+    cv2.imwrite(os.path.join(save_path, f"rgb1_{name_tag}.jpg"), rgb1)
+    cv2.imwrite(os.path.join(save_path, f"rgb2_{name_tag}.jpg"), rgb2)
+    cv2.imwrite(os.path.join(save_path, f"depth1_{name_tag}.jpg"), depth1)
+    cv2.imwrite(os.path.join(save_path, f"depth2_{name_tag}.jpg"), depth2)
+
+    with open(save_path + f"values_{name_tag}.txt", "w") as f:
+        save_str = f"{position[0, 0]} {position[0, 1]} {position[0, 2]} {action} {reward} {int(done)}"
+        f.write(save_str)
+    
+    with open(os.path.join(job_dir, "name_tags.txt"), 'a') as f:
+        f.write(name_tag + '\n')
 
 def setRandomPose(client, args):
     collision = True
