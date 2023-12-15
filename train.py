@@ -48,12 +48,15 @@ if __name__ == '__main__':
     total_episode_step = 0 # 에피소드의 현재 단계
     # map_voxel, map_infos = getMapVoxel(args.map_path) # 맵의 포인트 클라우드를 얻음
     map_pcd = getMapPointCloud(args.map_path) # 맵의 포인트 클라우드를 얻음
+    min_x, max_x, min_y, max_y = getMinMaxXY()
 
     replay = deque(maxlen=args.mem_size) 
     losses = []
 
     for epoch in range(args.epochs):
+        logger.info("\n\n" + "=" * 50)
         logger.info(f"\nEpisode : {epoch}")
+        print(f"\nEpisode : {epoch}")
         client = resetState(client, data_queue) # 매 epoch 마다 client를 리셋
         initial_z = client.getMultirotorState().kinematics_estimated.position.z_val
 
@@ -77,8 +80,12 @@ if __name__ == '__main__':
         while(status == "running"):     # 상태가 running일때 반복
             episode_step += 1   # 에피소드의 현재 단계를 1 증가
             total_episode_step += 1
-            logger.info(f"Episode step : {episode_step}")
-            qval = model1(rgb1, depth1)     # 모델 1에 RGB 이미지를 입력하여 Q값을 
+            logger.info(f"\nEpisode step : {episode_step}")
+            print(f"\nEpisode step : {episode_step}")
+
+            position = getDronePositionTensor(client, min_x, max_x, min_y, max_y, device)
+
+            qval = model1(rgb1, depth1, position)     # 모델 1에 RGB 이미지를 입력하여 Q값을 
             qval = qval.cpu().data.numpy()  # Q값을 numpy 배열로 변환
 
             action, move_or_rotate = calcValues(qval, client, args) # Q값을 통해 드론의 위치와 행동을 계산
@@ -88,9 +95,9 @@ if __name__ == '__main__':
                 v = args["drone"].default_velocity
                 x, y, _ = move_or_rotate
                 z = (initial_z - current_z) * 0.5 
-                move_with_timeout(client, x * v, y * v, z, 3)  # 3초 타임아웃
+                move_with_timeout(client, x * v, y * v, z, 1)  # 3초 타임아웃
             else:
-                rotate_with_timeout(client, move_or_rotate, 3)  # 3초 타임아웃
+                rotate_with_timeout(client, move_or_rotate, 1)  # 3초 타임아웃
             
             client.simPause(True)
             running_time += time.time() - move_start_time   # 드론이 움직인 시간을 측정
@@ -99,17 +106,25 @@ if __name__ == '__main__':
             depth2 = torch.from_numpy(depth2).unsqueeze(dim=0).permute(0, 3, 1, 2).float().to(device)
             curr_pcd = get_transformed_lidar_pc(client)
             decay_factor = TDRS.get_decay_factor(running_time)
-            reward = calcReward(global_pcd, curr_pcd, running_time, args) * decay_factor
+            reward = calcReward(global_pcd, curr_pcd, running_time, args) 
+            reward = reward * decay_factor if reward > 0 else reward
             logger.info(f"total reward : {reward}")
             print(f"total reward : {reward}")
+            logger.info(f"running_time : {running_time}")
+            print("running_time :", running_time)
             client.simPause(False)
 
             global_pcd = global_pcd + curr_pcd    # 현재 포인트 클라우드를 전체 클라우드에 복사
             global_pcd = global_pcd.voxel_down_sample(voxel_size=0.05)
+            logger.info(f"length of global_pcd.points : {len(global_pcd.points)}")
+            print("length of global_pcd.points :", len(global_pcd.points))
             if args.live_visualization: putDataIntoQueue(data_queue, curr_pcd)    # 3D 포인트 클라우드 데이터를 큐에 넣음
- 
+
             done = calcDone(map_pcd, global_pcd)    # 양수의 보상이 나오면 해당 에피소드는 목표를 달성하여 종료
-            exp =  (rgb1, rgb2, depth1, depth2, action, reward, done) # 경험을 튜플로 생성, 경험은 RGB 이미지, 행동, 보상, 종료 여부로 구성
+            logger.info(f"is done : {done}")
+            print(f"is done : {done}")
+            exp =  (rgb1, rgb2, depth1, depth2, position, action, reward, done) # 경험을 튜플로 생성, 경험은 RGB 이미지, 행동, 보상, 종료 여부로 구성
+            if args.train_mode == "manual": saveEXP(exp, job_dir, f"episode{epoch}_step{episode_step}")
             replay.append(exp) # 경험을 메모리에 저장. replay는 경험을 저장하는 리스트.
 
             rgb1 = copy.deepcopy(rgb2) # 다음 상태에서 쓸 이전 상태값을 보존하기 위한 깊은 복사
@@ -117,56 +132,50 @@ if __name__ == '__main__':
 
             if len(replay) > args.batch_size:   # 메모리에 저장된 경험의 수가 배치 사이즈보다 크면
                 minibatch = random.sample(replay, args.batch_size)
-                rgb1_batch = torch.cat([i1 for (i1, i2, d1, d2, a, rw, d) in minibatch], dim=0).to(device)
-                rgb2_batch = torch.cat([i2 for (i1, i2, d1, d2, a, rw, d) in minibatch], dim=0).to(device)
-                depth1_batch = torch.cat([d1 for (i1, i2, d1, d2, a, rw, d) in minibatch], dim=0).to(device)
-                depth2_batch = torch.cat([d2 for (i1, i2, d1, d2, a, rw, d) in minibatch], dim=0).to(device)
-                action_batch = torch.Tensor([a for (i1, i2, d1, d2, a, rw, d) in minibatch]).to(device)
-                reward_batch = torch.Tensor([rw for (i1, i2, d1, d2, a, rw, d) in minibatch]).to(device)
-                done_batch = torch.Tensor([d for (i1, i2, d1, d2, a, rw, d) in minibatch]).to(device)
+                rgb1_batch = torch.cat([i1 for (i1, i2, d1, d2, p, a, rw, d) in minibatch], dim=0).to(device)
+                rgb2_batch = torch.cat([i2 for (i1, i2, d1, d2, p, a, rw, d) in minibatch], dim=0).to(device)
+                depth1_batch = torch.cat([d1 for (i1, i2, d1, d2, p, a, rw, d) in minibatch], dim=0).to(device)
+                depth2_batch = torch.cat([d2 for (i1, i2, d1, d2, p, a, rw, d) in minibatch], dim=0).to(device)
+                position_batch = torch.cat([p for (i1, i2, d1, d2, p, a, rw, d) in minibatch], dim=0).to(device)
+                action_batch = torch.Tensor([a for (i1, i2, d1, d2, p, a, rw, d) in minibatch]).to(device)
+                reward_batch = torch.Tensor([rw for (i1, i2, d1, d2, p, a, rw, d) in minibatch]).to(device)
+                done_batch = torch.Tensor([d for (i1, i2, d1, d2, p, a, rw, d) in minibatch]).to(device)
 
-                Q1 = model1(rgb1_batch, depth1_batch)
+                Q1 = model1(rgb1_batch, depth1_batch, position_batch)
                 with torch.no_grad():
-                    Q2 = model2(rgb2_batch, depth2_batch)
+                    Q2 = model2(rgb2_batch, depth2_batch, position_batch)
 
                 # 이동 액션에 대한 Q 값
-                Q1_move = Q1[:, :3].gather(dim=1, index=action_batch.long().unsqueeze(dim=1)).squeeze()
-                # 회전 액션에 대한 Q 값
-                # Q1_rotate = Q1[:, 3]
+                Q1 = Q1.gather(dim=1, index=action_batch.long().unsqueeze(dim=1)).squeeze()
 
                 # 타깃 Q 값 계산
-                Y_move = reward_batch + args.gamma * ((1 - done_batch) * torch.max(Q2[:, :3], dim=1)[0])
-                # Y_rotate = reward_batch + args.gamma * ((1 - done_batch) * Q2[:, 3])
+                Y = reward_batch + args.gamma * ((1 - done_batch) * torch.max(Q2, dim=1)[0])
 
                 # 손실 계산: 이동과 회전 액션에 대한 손실을 각각 계산
-                loss_move = criterion(Q1_move, Y_move.detach())
-                # loss_rotate = criterion(Q1_rotate, Y_rotate.detach())
-                total_loss = loss_move # + loss_rotate
+                loss_move = criterion(Q1, Y.detach())
+                logger.info(f"loss : {loss_move.item()}")
+                print(f"loss : {loss_move.item()}")
 
-                logger.info(f"loss : {total_loss.item()}")
-                # print(f"total loss : {total_loss}")
                 optimizer.zero_grad()
-                total_loss.backward()
+                loss_move.backward()
                 optimizer.step()
                 
                 if total_episode_step % args.sync_freq == 0: # args.sync_freq는 동기화 주기, 업데이트 및 저장을 수행하는 빈도
                     model2.load_state_dict(model1.state_dict()) 
-                    torch.save(model1.state_dict(), os.path.join(job_dir, f'model_step{total_episode_step}.pth')) 
+                    torch.save(model2.state_dict(), os.path.join(job_dir, f'model_step{total_episode_step}.pth')) 
 
             status = calcStatus(reward, done) # 보상을 기반으로 현재 에피소드 상태를 계산.
-
-        if args.train_mode == "manual":
-            o3d.io.write_point_cloud(os.path.join(job_dir, f'global_pcd_epoch{epoch}.ply'), global_pcd)
-            torch.save(model1.state_dict(), os.path.join(job_dir, f'{date}_manual_mode_{args.backbone_name}_{epoch}epoch.pth'))
+            logger.info(f"status : {status}")
+            print(f"status : {status}")
 
         if epoch % args.eval_freq == 0 and epoch != 0: # 일정 주기마다 모델을 평가
             o3d.io.write_point_cloud(os.path.join(job_dir, f'global_pcd_epoch{epoch}.ply'), global_pcd)
-            acc = getAccuracy(model1, client, map_pcd, logger, args)    # 모델의 정확도를 계산
+            acc = getAccuracy(model2, client, map_pcd, logger, args)    # 모델의 정확도를 계산
             logger.info(f"Accuracy : {acc} (best : {best_acc})")
             if best_acc < acc: # 정확도가 높아지면
                 best_acc = acc # 정확도를 갱신
                 print("Save new best model...") # 새로운 최고 정확도를 출력
-                torch.save(model1.state_dict(), os.path.join(job_dir, 'best_accurracy.pth')) 
+                torch.save(model2.state_dict(), os.path.join(job_dir, 'best_accurracy.pth')) 
 
     if args.live_visualization: # 라이브 시각화 프로세스가 동작중이면
         live_vis_process.join() # 프로세스가 종료될 때까지 기다림
