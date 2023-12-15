@@ -17,8 +17,12 @@ TDRS.decay_factor = 0.95
 TDRS.min_decay_factor = 0
 TDRS.every_second = 10
 
+manual = edict()
+manual.txt_path = ""
+manual.batch_size = 16
+
 # main
-args = edict(drone=drone, TDRS=TDRS)
+args = edict(drone=drone, TDRS=TDRS, manual=manual)
 
 args.device = torch.device(f"cuda" if torch.cuda.is_available() else "cpu")
 
@@ -49,4 +53,5 @@ args.eval_freq = 50
 args.eval_steps = 10
 
 args.live_visualization = False
+
 args.train_mode = "manual" # manual or auto
