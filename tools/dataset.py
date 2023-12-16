@@ -7,24 +7,24 @@ import os
 
 class ManualDataset(Dataset):
     def __init__(self, txt_path):
-        self.root = "/".join(txt_path.split("/")[:-1]) + "/exp"
+        self.root = "data"
         self.ids = list()
         with open(txt_path, 'r') as f:
             for line in f.readlines():
-                self.ids.append(line.strip())
+                self.ids.append(line.strip().split("/"))
 
     def __len__(self):
         return len(self.ids)
 
     def __getitem__(self, index):
-        name_tag = self.ids[index]
+        date, name_tag = self.ids[index]
         
-        rgb1 = np.load(os.path.join(self.root, f"rgb1_{name_tag}.npy"))
-        rgb2 = np.load(os.path.join(self.root, f"rgb2_{name_tag}.npy"))
-        depth1 = np.load(os.path.join(self.root, f"depth1_{name_tag}.npy"))
-        depth2 = np.load(os.path.join(self.root, f"depth2_{name_tag}.npy"))
+        rgb1 = np.load(os.path.join(self.root, date, f"rgb1_{name_tag}.npy"))
+        rgb2 = np.load(os.path.join(self.root, date, f"rgb2_{name_tag}.npy"))
+        depth1 = np.load(os.path.join(self.root, date, f"depth1_{name_tag}.npy"))
+        depth2 = np.load(os.path.join(self.root, date, f"depth2_{name_tag}.npy"))
 
-        with open(self.root + f"values_{name_tag}.txt", "r") as f:
+        with open(os.path.join(self.root, date, f"values_{name_tag}.txt"), "r") as f:
             line = f.readline()
         
         p1, p2, p3, action, reward, done = map(float, line.split())
