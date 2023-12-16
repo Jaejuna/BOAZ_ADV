@@ -1,7 +1,7 @@
 from torch.utils.data import Dataset
 import torch
 
-import cv2
+import numpy as np
 
 import os
 
@@ -18,11 +18,11 @@ class ManualDataset(Dataset):
 
     def __getitem__(self, index):
         name_tag = self.ids[index]
-            
-        rgb1 = cv2.imread(os.path.join(self.root, f"rgb1_{name_tag}.jpg"))
-        rgb2 = cv2.imread(os.path.join(self.root, f"rgb2_{name_tag}.jpg"))
-        depth1 = cv2.imread(os.path.join(self.root, f"depth1_{name_tag}.jpg"))
-        depth2 = cv2.imread(os.path.join(self.root, f"depth2_{name_tag}.jpg"))
+        
+        rgb1 = np.load(os.path.join(self.root, f"rgb1_{name_tag}.npy"))
+        rgb2 = np.load(os.path.join(self.root, f"rgb2_{name_tag}.npy"))
+        depth1 = np.load(os.path.join(self.root, f"depth1_{name_tag}.npy"))
+        depth2 = np.load(os.path.join(self.root, f"depth2_{name_tag}.npy"))
 
         with open(self.root + f"values_{name_tag}.txt", "r") as f:
             line = f.readline()

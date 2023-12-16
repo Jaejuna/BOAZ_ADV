@@ -215,16 +215,21 @@ def getDronePositionTensor(client, min_x, max_x, min_y, max_y, device):
 
 def saveEXP(exp, job_dir, name_tag):
     rgb1, rgb2, depth1, depth2, position, action, reward, done = exp
+    
+    rgb1 = rgb1.cpu().detach().data.numpy()
+    rgb2 = rgb2.cpu().detach().data.numpy()
+    depth1 = depth1.cpu().detach().data.numpy()
+    depth2 = depth2.cpu().detach().data.numpy()
 
     save_path = os.path.join(job_dir, "exp")
     os.makedirs(save_path, exist_ok=True)
 
-    cv2.imwrite(os.path.join(save_path, f"rgb1_{name_tag}.jpg"), rgb1)
-    cv2.imwrite(os.path.join(save_path, f"rgb2_{name_tag}.jpg"), rgb2)
-    cv2.imwrite(os.path.join(save_path, f"depth1_{name_tag}.jpg"), depth1)
-    cv2.imwrite(os.path.join(save_path, f"depth2_{name_tag}.jpg"), depth2)
+    np.save(os.path.join(save_path, f"rgb1_{name_tag}.npy"), rgb1)
+    np.save(os.path.join(save_path, f"rgb2_{name_tag}.npy"), rgb2)
+    np.save(os.path.join(save_path, f"depth1_{name_tag}.npy"), depth1)
+    np.save(os.path.join(save_path, f"depth2_{name_tag}.npy"), depth2)
 
-    with open(save_path + f"values_{name_tag}.txt", "w") as f:
+    with open(os.path.join(save_path, f"values_{name_tag}.txt"), "w") as f:
         save_str = f"{position[0, 0]} {position[0, 1]} {position[0, 2]} {action} {reward} {int(done)}"
         f.write(save_str)
     
