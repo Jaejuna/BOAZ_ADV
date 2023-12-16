@@ -167,7 +167,7 @@ if __name__ == '__main__':
             status = calcStatus(reward, done) # 보상을 기반으로 현재 에피소드 상태를 계산.
             logger.info(f"status : {status}")
             print(f"status : {status}")
-
+        
         if epoch % args.eval_freq == 0 and epoch != 0: # 일정 주기마다 모델을 평가
             o3d.io.write_point_cloud(os.path.join(job_dir, f'global_pcd_epoch{epoch}.ply'), global_pcd)
             acc = getAccuracy(model2, client, map_pcd, logger, args)    # 모델의 정확도를 계산

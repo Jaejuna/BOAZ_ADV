@@ -18,7 +18,7 @@ TDRS.min_decay_factor = 0
 TDRS.every_second = 10
 
 manual = edict()
-manual.txt_path = ""
+manual.txt_path = "data/name_tags.txt"
 manual.batch_size = 16
 
 # main

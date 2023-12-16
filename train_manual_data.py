@@ -41,18 +41,18 @@ if __name__ == '__main__':
     for exp in data_loader:
         rgb1, rgb2, depth1, depth2, position, action, reward, done = exp
 
-        rgb1 = rgb1.to(device)
-        depth1 = depth1.to(device)
-        position = position.to(device)
-        action = action.to(device)
-        reward = reward.to(device)
-        done = done.to(device)
+        rgb1 = rgb1.to(device).float()
+        depth1 = depth1.to(device).float()
+        position = position.to(device).float()
+        action = action.to(device).float()
+        reward = reward.to(device).float()
+        done = done.to(device).float()
 
         Q = model(rgb1, depth1, position)
 
         softmax_batch = F.softmax(Q, dim=1).detach().cpu().numpy()
         Q_action = [np.random.choice(np.array([0, 1, 2]), p=softmax) for softmax in softmax_batch]
-        Q_action = torch.Tensor(Q_action).to(device)
+        Q_action = torch.FloatTensor(Q_action).to(device)
 
         Q = Q.gather(dim=1, index=Q_action.long().unsqueeze(dim=1)).squeeze()
         Y = reward + args.gamma * ((1 - done) * action)
