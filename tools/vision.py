@@ -12,8 +12,6 @@ import cv2
 import numpy as np
 import open3d as o3d
 
-# import utils.binvox_rw as binvox_rw
-
 from config.default import args
 
 def savePointCloud(pcd, fileName):
@@ -60,35 +58,6 @@ def getImages(client):
     depth_img = np.repeat(depth_img, 3, axis=2)
 
     return rgb_img, depth_img
-
-# Note: This code needs to be run in an environment where AirSim is configured and running.
-
-
-# def getImages(client):
-#    # Request DepthPerspective image as uncompressed float
-#    responses = client.simGetImages(
-#       [
-#          airsim.ImageRequest("0", airsim.ImageType.Scene , False, False),
-#          airsim.ImageRequest("0", airsim.ImageType.DepthPerspective, True, False),
-#       ]
-#    )
-#    rgb_response, depth_response = responses[0], responses[1]
-
-#    # get numpy array
-#    img1d = np.fromstring(rgb_response.image_data_uint8, dtype=np.uint8) 
-
-#    # reshape array to 4 channel image array H X W X 3
-#    rgb_img = img1d.reshape(rgb_response.height, rgb_response.width, 3)
-
-#    # Reshape to a 2d array with correct width and height
-#    depth_img = airsim.list_to_2d_float_array(depth_response.image_data_float, depth_response.width, depth_response.height)
-#    depth_img = depth_img.reshape(depth_response.height, depth_response.width, 1)
-
-#    # Convert depth_img to millimeters to fill out 16bit unsigned int space (0..65535). Also clamp large values (e.g. SkyDome) to 65535
-#    depth_img = depth_img * 1000
-#    depth_img = np.clip(depth_img, 0, 65535).astype(np.uint16)
-
-#    return rgb_img, depth_img
 
 def getPointCloudByIntrinsic(client):
    rgb_img, depth_img = getImages(client)
