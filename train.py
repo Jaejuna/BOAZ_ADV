@@ -54,9 +54,8 @@ if __name__ == '__main__':
     losses = []
 
     for epoch in range(args.epochs):
-        logger.info("\n\n" + "=" * 50)
-        logger.info(f"\nEpisode : {epoch}")
-        print(f"\nEpisode : {epoch}")
+        print_and_logging(logger, "\n\n" + "=" * 50)
+        print_and_logging(logger, f"\nEpisode : {epoch}")
         client = resetState(client, data_queue) # 매 epoch 마다 client를 리셋
         initial_z = client.getMultirotorState().kinematics_estimated.position.z_val
 
@@ -80,8 +79,7 @@ if __name__ == '__main__':
         while(status == "running"):     # 상태가 running일때 반복
             episode_step += 1   # 에피소드의 현재 단계를 1 증가
             total_episode_step += 1
-            logger.info(f"\nEpisode step : {episode_step}")
-            print(f"\nEpisode step : {episode_step}")
+            print_and_logging(logger, f"\nEpisode step : {episode_step}")
 
             position = getDronePositionTensor(client, min_x, max_x, min_y, max_y, device)
 
@@ -108,21 +106,17 @@ if __name__ == '__main__':
             decay_factor = TDRS.get_decay_factor(running_time)
             reward = calcReward(global_pcd, curr_pcd, running_time, args) 
             reward = reward * decay_factor if reward > 0 else reward
-            logger.info(f"total reward : {reward}")
-            print(f"total reward : {reward}")
-            logger.info(f"running_time : {running_time}")
-            print("running_time :", running_time)
+            print_and_logging(logger, f"total reward : {reward}")
+            print_and_logging(logger, f"running_time : {running_time}")
             client.simPause(False)
 
             global_pcd = global_pcd + curr_pcd    # 현재 포인트 클라우드를 전체 클라우드에 복사
             global_pcd = global_pcd.voxel_down_sample(voxel_size=0.05)
-            logger.info(f"length of global_pcd.points : {len(global_pcd.points)}")
-            print("length of global_pcd.points :", len(global_pcd.points))
+            print_and_logging(logger, f"length of global_pcd.points : {len(global_pcd.points)}")
             if args.live_visualization: putDataIntoQueue(data_queue, curr_pcd)    # 3D 포인트 클라우드 데이터를 큐에 넣음
 
             done = calcDone(map_pcd, global_pcd)    # 양수의 보상이 나오면 해당 에피소드는 목표를 달성하여 종료
-            logger.info(f"is done : {done}")
-            print(f"is done : {done}")
+            print_and_logging(logger, f"is done : {done}")
             exp =  (rgb1, rgb2, depth1, depth2, position, action, reward, done) # 경험을 튜플로 생성, 경험은 RGB 이미지, 행동, 보상, 종료 여부로 구성
             if args.train_mode == "manual": saveEXP(exp, job_dir, f"episode{epoch}_step{episode_step}")
             replay.append(exp) # 경험을 메모리에 저장. replay는 경험을 저장하는 리스트.
@@ -153,8 +147,7 @@ if __name__ == '__main__':
 
                 # 손실 계산: 이동과 회전 액션에 대한 손실을 각각 계산
                 loss_move = criterion(Q1, Y.detach())
-                logger.info(f"loss : {loss_move.item()}")
-                print(f"loss : {loss_move.item()}")
+                print_and_logging(logger, f"loss : {loss_move.item()}")
 
                 optimizer.zero_grad()
                 loss_move.backward()
@@ -165,16 +158,15 @@ if __name__ == '__main__':
                     torch.save(model2.state_dict(), os.path.join(job_dir, f'model_step{total_episode_step}.pth')) 
 
             status = calcStatus(reward, done) # 보상을 기반으로 현재 에피소드 상태를 계산.
-            logger.info(f"status : {status}")
-            print(f"status : {status}")
+            print_and_logging(logger, f"status : {status}")
         
         if epoch % args.eval_freq == 0 and epoch != 0: # 일정 주기마다 모델을 평가
             o3d.io.write_point_cloud(os.path.join(job_dir, f'global_pcd_epoch{epoch}.ply'), global_pcd)
             acc = getAccuracy(model2, client, map_pcd, logger, args)    # 모델의 정확도를 계산
-            logger.info(f"Accuracy : {acc} (best : {best_acc})")
+            print_and_logging(logger, f"Accuracy : {acc} (best : {best_acc})")
             if best_acc < acc: # 정확도가 높아지면
                 best_acc = acc # 정확도를 갱신
-                print("Save new best model...") # 새로운 최고 정확도를 출력
+                print_and_logging(logger, "Save new best model...")
                 torch.save(model2.state_dict(), os.path.join(job_dir, 'best_accurracy.pth')) 
 
     if args.live_visualization: # 라이브 시각화 프로세스가 동작중이면
