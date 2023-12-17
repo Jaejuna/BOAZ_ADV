@@ -69,6 +69,10 @@ def make_logger(job_dir):
 
     return logger
 
+def print_and_logging(logger, log):
+    logger.info(log)
+    print(log)
+
 def move_with_timeout(client, x, y, z, duration):
     # 이동 명령 실행
     def move():
