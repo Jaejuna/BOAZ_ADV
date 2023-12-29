@@ -10,7 +10,7 @@ import time
 
 from tools.vision import *
 from tools.train_utils import *
-from tools.models import RGBDepthFusionNet
+from tools.models import *
 
 import threading
 
@@ -48,12 +48,22 @@ class StoppableThread(threading.Thread):
         self._stop_event.set()
 
 def create_models(args):
-    model1 = RGBDepthFusionNet(num_classes=args.num_classes, backbone=args.backbone_name) # 모델 생성
+    model1 = None
+    if args.model_type == "normal":
+        model1 = RGBDepthFusionNet(num_classes=args.num_classes, backbone=args.backbone_name) # 모델 생성
+    elif args.model_type == "lower":
+        model1 = LowerComplexityRGBDepthFusionNet(num_classes=args.num_classes)
+    elif args.model_type == "higher":
+        model1 = AttentionFusionRGBDepthFusionNet(num_classes=args.num_classes)
+    assert model1 is not None, "model type을 정확히 기입해주세요. (normal, lower, higher)"
+
     if args.checkpoint is not None: model1.load_state_dict(torch.load(args.checkpoint))
-    model2 = copy.deepcopy(model1) # 모델 생성 22
-    model2.load_state_dict(model1.state_dict())  # 모델 2에 모델 1의 가중치와 매개변수를 복사
     model1.to(args.device) # 모델 1을 cpu or gpu에 할당
-    model2.to(args.device) # 모델 2를 cpu or gpu에 할당
+    model2 = None
+    if args.train_mode == "auto":
+        model2 = copy.deepcopy(model1) # 모델 생성 22
+        model2.load_state_dict(model1.state_dict())  # 모델 2에 모델 1의 가중치와 매개변수를 복사
+        model2.to(args.device) # 모델 2를 cpu or gpu에 할당
     return model1, model2
 
 def make_logger(job_dir):
@@ -138,8 +148,9 @@ def calcDegree(client, action):
     elif action == 2: degree += 90
     return degree
 
-def calcValues(qval, client, args):
-    softmax = F.softmax(torch.from_numpy(qval[0, :3]), dim=0).detach().cpu().numpy()
+def calcValues(qval, client, logger, args):
+    softmax = F.softmax(qval[0], dim=0).detach().cpu().numpy()
+    if logger is not None: print_and_logging(logger, f"\nqval softmax : {softmax}")
     action = np.random.choice(np.array([0, 1, 2]), p=softmax)
     if args.train_mode == "manual": 
         while 1:
