@@ -25,8 +25,8 @@ manual.batch_size = 16
 
 manual.transform = transforms.Compose([
     transforms.ToPILImage(),
-    # transforms.RandomAffine(degrees=0, translate=(0.05, 0.05)),  
-    # transforms.RandomResizedCrop(size=(224, 224), scale=(0.95, 1.0)),  
+    # transforms.RandomAffine(degrees=0, translate=(0.02, 0.02)),  
+    # transforms.RandomResizedCrop(size=(224, 224), scale=(0.98, 1.0)),  
     transforms.ToTensor(),
 ])
 
@@ -57,7 +57,7 @@ args.max_time = 200
 
 args.voxel_threshold = 0.002
 args.reward_state_threshold = 0.5
-args.voxel_size = 0.5
+args.voxel_size = 1
 
 args.eval_freq = 50
 args.eval_steps = 10
