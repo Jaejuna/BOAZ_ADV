@@ -34,11 +34,12 @@ class AirSimEnv(gym.Env):
         return self._get_obs()
 
 class AirSimDroneEnv(AirSimEnv):
-    def __init__(self, ip_address, step_length, image_shape, args):
+    def __init__(self, ip_address, step_length, image_shape, logger, args):
         super().__init__(image_shape)
         self.step_length = step_length
         self.image_shape = image_shape
         self.args = args
+        self.logger = logger
 
         self.state = {
             "position": np.zeros(3),
@@ -108,6 +109,7 @@ class AirSimDroneEnv(AirSimEnv):
         self._do_action(action)
         obs = self._get_obs()
         reward, done = self._compute_reward()
+        print_and_logging(self.logger, f"obs, reward, done, self.state : {obs} {reward} {done} {self.state}")
         return obs, reward, done, self.state
 
     def reset(self):
