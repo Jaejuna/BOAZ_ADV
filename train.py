@@ -47,7 +47,7 @@ if __name__ == '__main__':
     best_acc = 0  # 가장 높은 정확도
     total_episode_step = 0 # 에피소드의 현재 단계
     # map_voxel, map_infos = getMapVoxel(args.map_path) # 맵의 포인트 클라우드를 얻음
-    map_pcd = getMapPointCloud(args.map_path) # 맵의 포인트 클라우드를 얻음
+    map_pcd = getMapPointCloud(args) # 맵의 포인트 클라우드를 얻음
     min_x, max_x, min_y, max_y = getMinMaxXY()
 
     replay = deque(maxlen=args.mem_size) 
@@ -83,10 +83,9 @@ if __name__ == '__main__':
 
             position = getDronePositionTensor(client, min_x, max_x, min_y, max_y, device)
 
-            qval = model1(rgb1, depth1, position)     # 모델 1에 RGB 이미지를 입력하여 Q값을 
-            qval = qval.cpu().data.numpy()  # Q값을 numpy 배열로 변환
+            qval = model1(rgb1, depth1, position) # 모델 1에 RGB 이미지를 입력하여 Q값을 
 
-            action, move_or_rotate = calcValues(qval, client, args) # Q값을 통해 드론의 위치와 행동을 계산
+            action, move_or_rotate = calcValues(qval, client, logger, args) # Q값을 통해 드론의 위치와 행동을 계산
             move_start_time = time.time()   # 현재 시간을 측정, 드론이 움직이기 시작한 시간
             if action == 0:
                 current_z = client.getMultirotorState().kinematics_estimated.position.z_val
@@ -111,7 +110,7 @@ if __name__ == '__main__':
             client.simPause(False)
 
             global_pcd = global_pcd + curr_pcd    # 현재 포인트 클라우드를 전체 클라우드에 복사
-            global_pcd = global_pcd.voxel_down_sample(voxel_size=0.05)
+            global_pcd = global_pcd.voxel_down_sample(voxel_size=args.voxel_size)
             print_and_logging(logger, f"length of global_pcd.points : {len(global_pcd.points)}")
             if args.live_visualization: putDataIntoQueue(data_queue, curr_pcd)    # 3D 포인트 클라우드 데이터를 큐에 넣음
 

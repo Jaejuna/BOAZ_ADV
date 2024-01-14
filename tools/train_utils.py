@@ -176,15 +176,15 @@ def calcDone(map_pcd, curr_pcd):
     done = len(curr_pcd.points) >= len(map_pcd.points) * 0.7
     return done
 
-def calcReward(prev_pcd, curr_pcd, running_time, args):
-    if running_time >= args.max_time:
-        reward = -10.0
-        return reward
+def calcReward(prev_pcd, curr_pcd, args): #, running_time, args):
+    # if running_time >= args.max_time:
+    #     reward = -10.0
+    #     return reward
     
     len_ori_curr = len(curr_pcd.points)
     len_prev = len(prev_pcd.points)
     curr_pcd = prev_pcd + curr_pcd
-    curr_pcd = curr_pcd.voxel_down_sample(voxel_size=0.05)
+    curr_pcd = curr_pcd.voxel_down_sample(voxel_size=args.voxel_size)
     len_curr = len(curr_pcd.points)
     reward = abs(len_curr - len_prev) / len_ori_curr
 

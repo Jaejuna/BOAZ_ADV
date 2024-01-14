@@ -28,9 +28,8 @@ def test(model, client, map_pcd, args):
         running_time = time.time()
         while(status == "running"): 
             qval = model(rgb1, depth1)
-            qval = qval.cpu().data.numpy()
 
-            action, move_or_rotate = calcValues(qval, client, args) # Q값을 통해 드론의 위치와 행동을 계산
+            action, move_or_rotate = calcValues(qval, client, None, args) # Q값을 통해 드론의 위치와 행동을 계산
             move_start_time = time.time()   # 현재 시간을 측정, 드론이 움직이기 시작한 시간
             if action == 0:
                 current_z = client.getMultirotorState().kinematics_estimated.position.z_val

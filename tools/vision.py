@@ -50,9 +50,13 @@ def getImages(client):
     rgb_img = rgb_img.astype(np.float32) / 255.0  # Normalize to 0-1
 
     # Process the Depth image without converting to 16-bit and normalize it
-    depth_img = airsim.list_to_2d_float_array(depth_response.image_data_float, depth_response.width, depth_response.height)
-    depth_img = depth_img.reshape(depth_response.height, depth_response.width, 1)
-    depth_img = (depth_img - depth_img.min()) / (depth_img.max() - depth_img.min())  # Normalize to 0-1
+    depth_img = np.array(depth_response.image_data_float, dtype=np.float32)
+    depth_img = depth_img.reshape(depth_response.height, depth_response.width) * 255
+    depth_img[depth_img > 255] = 255
+    depth_img = depth_img / 255
+   #  depth_img = airsim.list_to_2d_float_array(depth_response.image_data_float, depth_response.width, depth_response.height)
+   #  depth_img = depth_img.reshape(depth_response.height, depth_response.width, 1)
+   #  depth_img = (depth_img - depth_img.min()) / (depth_img.max() - depth_img.min())  # Normalize to 0-1
 
     # Duplicate the depth channel to create a 3-channel image
     depth_img = np.repeat(depth_img, 3, axis=2)
@@ -123,34 +127,6 @@ def mergePointClouds(cloud1, cloud2, client):
    merged_pcd = source + target
    return merged_pcd
 
-# def pcd_to_voxel_tensor(pcd, infos=None):
-#    # 포인트 클라우드에서 복셀 그리드 생성
-#    voxel_size = args.voxel_size
-#    voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(pcd, voxel_size=voxel_size)
-   
-#    if infos is not None:
-#       min_bound, max_bound, dims = infos
-
-#    else:
-#       # 복셀 그리드의 바운딩 박스 얻기
-#       min_bound = voxel_grid.get_min_bound() // voxel_size
-#       max_bound = voxel_grid.get_max_bound() // voxel_size
-#       dims = np.ceil(max_bound - min_bound).astype(np.int64)
-
-#    # 복셀의 중심 포인트 얻기
-#    centers = np.array([voxel.grid_index for voxel in voxel_grid.get_voxels()], dtype=np.float32)
-#    indices = np.round((centers - min_bound) / voxel_size).astype(np.int64) 
-
-#    # 빈 텐서(모든 값이 0) 생성
-#    tensor = torch.zeros(*dims, dtype=torch.float32)
-
-#    # 텐서에 복셀 값 설정
-#    indices[:, 0] = np.clip(indices[:, 0], 0, dims[0]-1)
-#    indices[:, 1] = np.clip(indices[:, 1], 0, dims[1]-1)
-#    indices[:, 2] = np.clip(indices[:, 2], 0, dims[2]-1)
-#    tensor[indices[:, 0], indices[:, 1], indices[:, 2]] = 1.0
-#    return tensor, [min_bound, max_bound, dims]
-
 def pcd_to_voxel_tensor(pcd, infos=None):
    # 포인트 클라우드에서 복셀 그리드 생성
    voxel_size = args.voxel_size
@@ -205,8 +181,9 @@ def getMapVoxel(map_path):
    pcd, map_infos = pcd_to_voxel_tensor(pcd)
    return pcd, map_infos
 
-def getMapPointCloud(map_path):
-   pcd = o3d.io.read_point_cloud(map_path)
+def getMapPointCloud(args):
+   pcd = o3d.io.read_point_cloud(args.map_path)
+   pcd = pcd.voxel_down_sample(voxel_size=args.voxel_size)
    return pcd
 
 def extract_infos_from_pcd(pcd):
