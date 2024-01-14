@@ -12,6 +12,7 @@ from tools.vision import *
 from tools.train_utils import *
 from tools.models import *
 
+import ctypes
 import threading
 
 import logging
@@ -29,23 +30,30 @@ class TimeDecayRewardScheduler():
             return self.min_decay_factor
         return result
 
+def async_raise(tid, exctype):
+    """스레드를 강제로 종료시키는 함수"""
+    res = ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(tid), ctypes.py_object(exctype))
+    if res == 0:
+        raise ValueError("유효하지 않은 스레드 ID")
+    elif res != 1:
+        ctypes.pythonapi.PyThreadState_SetAsyncExc(tid, None)
+        raise SystemError("PyThreadState_SetAsyncExc 실패")
+
 class StoppableThread(threading.Thread):
-    def __init__(self, target, args=(), kwargs=None):
-        super().__init__(target=target, args=args, kwargs=kwargs if kwargs else {})
-        self._stop_event = threading.Event()
+    def __init__(self, target, args=(), kwargs=None, timeout=5):
+        super().__init__()
+        self._target = target
+        self._args = args
+        self._kwargs = kwargs if kwargs else {}
+        self._timeout = timeout
+        self._thread = None
 
     def run(self):
-        start_time = time.time()
-        while not self._stop_event.is_set():
-            if time.time() - start_time > 3:  # 3초 타임아웃
-                break
-            try:
-                super().run()
-            finally:
-                self._stop_event.set()
-
-    def stop(self):
-        self._stop_event.set()
+        self._thread = threading.Thread(target=self._target, args=self._args, kwargs=self._kwargs)
+        self._thread.start()
+        self._thread.join(self._timeout)
+        if self._thread.is_alive():
+            async_raise(self._thread.ident, SystemExit)
 
 def create_models(args):
     model1 = None
