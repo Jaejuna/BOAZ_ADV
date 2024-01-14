@@ -13,17 +13,21 @@ from stable_baselines3.common.vec_env import VecTransposeImage
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.callbacks import EvalCallback
 
+from tools.train_utils import * 
 from config.default import args
 
 date = datetime.now().strftime('%Y-%m-%d_%Hh%Mm%Ss')
 job_dir = os.path.join("./run", date)
 os.makedirs(job_dir, exist_ok=True)
 
+logger = make_logger(job_dir)
+
 # Create a DummyVecEnv for main airsim gym env
 env = AirSimDroneEnv(
     ip_address="127.0.0.1",
     step_length=0.25,
     image_shape=(224, 224, 1),
+    logger=logger,
     args=args
 )
 
