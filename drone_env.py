@@ -78,8 +78,6 @@ class AirSimDroneEnv(AirSimEnv):
         image = self.transform_obs(responses)
         
         self.curr_pcd = get_transformed_lidar_pc(self.drone)
-        global_pcd = self.global_pcd + self.curr_pcd    
-        self.global_pcd = global_pcd.voxel_down_sample(voxel_size=self.args.voxel_size)
 
         self.drone_state = self.drone.getMultirotorState()
 
@@ -109,6 +107,8 @@ class AirSimDroneEnv(AirSimEnv):
         self._do_action(action)
         obs = self._get_obs()
         reward, done = self._compute_reward()
+        global_pcd = self.global_pcd + self.curr_pcd    
+        self.global_pcd = global_pcd.voxel_down_sample(voxel_size=self.args.voxel_size)
         print_and_logging(self.logger, f"reward, done, self.state : {reward} {done} {self.state}")
         return obs, reward, done, self.state
 
