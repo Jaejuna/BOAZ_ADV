@@ -40,7 +40,7 @@ def async_raise(tid, exctype):
         raise SystemError("PyThreadState_SetAsyncExc 실패")
 
 class StoppableThread(threading.Thread):
-    def __init__(self, target, args=(), kwargs=None, client=None, timeout=4):
+    def __init__(self, target, args=(), kwargs=None, client=None, timeout=5):
         super().__init__()
         self._target = target
         self._args = args
