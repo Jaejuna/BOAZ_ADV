@@ -4,7 +4,7 @@ import torch.nn.init as init
 import torchvision.models as models
 
 class MovePredictModel(nn.Module):
-    def __init__(self, num_classes, backbone="resnet18", pretrained=True):
+    def __init__(self, num_classes, backbone="resnet50", pretrained=True):
         super().__init__()
         if backbone == "resnet18":
             self.backbone = models.resnet18(pretrained=pretrained)
@@ -19,10 +19,16 @@ class MovePredictModel(nn.Module):
         else:
             raise Exception("Only ResNet series available.")
         
+        # 첫 번째 합성곱 계층의 입력 채널을 1로 변경
+        self.backbone.conv1 = nn.Conv2d(1, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+
+        # 완전 연결 계층에 배치 정규화 적용
         self.fc_layer = nn.Sequential(
             nn.Linear(1000, 512), 
+            nn.BatchNorm1d(512),  # 배치 정규화 추가
             nn.ReLU(),
             nn.Linear(512, 128),
+            nn.BatchNorm1d(128),  # 배치 정규화 추가
             nn.ReLU(),
             nn.Linear(128, num_classes)
         )
