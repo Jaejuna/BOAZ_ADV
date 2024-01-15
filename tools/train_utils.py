@@ -40,19 +40,21 @@ def async_raise(tid, exctype):
         raise SystemError("PyThreadState_SetAsyncExc 실패")
 
 class StoppableThread(threading.Thread):
-    def __init__(self, target, args=(), kwargs=None, timeout=5):
+    def __init__(self, target, args=(), kwargs=None, client=None, timeout=4):
         super().__init__()
         self._target = target
         self._args = args
         self._kwargs = kwargs if kwargs else {}
         self._timeout = timeout
         self._thread = None
+        self.client = client
 
     def run(self):
         self._thread = threading.Thread(target=self._target, args=self._args, kwargs=self._kwargs)
         self._thread.start()
         self._thread.join(self._timeout)
         if self._thread.is_alive():
+            if self.client is not None: self.client.cancelLastTask()
             async_raise(self._thread.ident, SystemExit)
 
 def create_models(args):
@@ -96,7 +98,7 @@ def move_with_timeout(client, x, y, z, duration):
     def move():
         client.moveByVelocityAsync(x, y, z, 1).join()
     
-    move_thread = StoppableThread(target=move)
+    move_thread = StoppableThread(target=move, client=client)
     move_thread.start()
     
     # 설정된 타임아웃 후에 스레드 검사
@@ -111,7 +113,7 @@ def rotate_with_timeout(client, degree, duration):
     def rotate():
         client.rotateToYawAsync(degree).join()
     
-    rotate_thread = StoppableThread(target=rotate)
+    rotate_thread = StoppableThread(target=rotate, client=client)
     rotate_thread.start()
     
     # 설정된 타임아웃 후에 스레드 검사
