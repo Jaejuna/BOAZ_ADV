@@ -7,9 +7,7 @@ from datetime import datetime
 import time
 
 from drone_env import AirSimDroneEnv
-from stable_baselines3 import DQN
-from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import VecTransposeImage
+from stable_baselines3 import DQN, A2C, PPO
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.callbacks import EvalCallback
 
@@ -31,9 +29,6 @@ env = AirSimDroneEnv(
     args=args
 )
 
-# Wrap env as VecTransposeImage to allow SB to handle frame observations
-# env = VecTransposeImage(env)
-
 # Initialize RL algorithm type and parameters
 model = DQN(
     "CnnPolicy",
@@ -51,6 +46,41 @@ model = DQN(
     device="cuda",
     tensorboard_log=job_dir,
 )
+
+# model = A2C(
+#     "CnnPolicy",
+#     env,
+#     learning_rate=7e-4,
+#     n_steps=5,
+#     gamma=0.99,
+#     gae_lambda=1.0,
+#     ent_coef=0.0,
+#     n_envs=4,
+#     vf_coef=0.5,
+#     max_grad_norm=0.5,
+#     use_rms_prop=True,
+#     tensorboard_log=job_dir,
+#     verbose=1,
+#     device="cuda"
+# )
+
+# model = PPO(
+#     "CnnPolicy",
+#     env,
+#     learning_rate=3e-4,
+#     n_steps=2048,
+#     batch_size=32,
+#     n_epochs=10,
+#     gamma=0.99,
+#     gae_lambda=0.95,
+#     clip_range=0.2,
+#     ent_coef=0.0,
+#     vf_coef=0.5,
+#     max_grad_norm=0.5,
+#     verbose=1,
+#     tensorboard_log=job_dir,
+#     device="cuda"
+# )
 
 # Create an evaluation callback with the same env, called every 10000 iterations
 callbacks = []
