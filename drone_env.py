@@ -109,7 +109,7 @@ class AirSimDroneEnv(AirSimEnv):
         self._do_action(action)
         obs = self._get_obs()
         reward, done = self._compute_reward()
-        print_and_logging(self.logger, f"obs, reward, done, self.state : {obs} {reward} {done} {self.state}")
+        print_and_logging(self.logger, f"reward, done, self.state : {reward} {done} {self.state}")
         return obs, reward, done, self.state
 
     def reset(self):
